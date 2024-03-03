@@ -86,7 +86,7 @@ void* block_alloc(block_allocator_t* allocator) {
 		} else {
 			// Chunk is full, allocate a new chunk
 			if (allocator->used_chunks < allocator->chunk_count) {
-//				console_print("block_alloc(): allocating a new chunk\n");
+				console_print("; block_alloc(): allocating a new chunk at used_chunks: %d\n", allocator->used_chunks);
 				chunk_index = allocator->used_chunks++;
 				current_chunk = allocator->chunks + chunk_index;
 				ASSERT(current_chunk->memory == NULL);

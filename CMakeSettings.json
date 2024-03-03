@@ -1,0 +1,49 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "TIFF_LIBRARY_DEBUG",
+          "value": "C:/Users/regula/source/libtiff-4.2.0/lib/tiff.lib",
+          "type": "FILEPATH"
+        },
+        {
+          "name": "TIFF_INCLUDE_DIR",
+          "value": "C:/Users/regula/source/libtiff-4.2.0/include",
+          "type": "PATH"
+        }
+      ]
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "configurationType": "Release",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "TIFF_INCLUDE_DIR",
+          "value": "C:/Users/regula/source/libtiff-4.2.0/include",
+          "type": "PATH"
+        },
+        {
+          "name": "TIFF_LIBRARY_RELEASE",
+          "value": "C:/Users/regula/source/libtiff-4.2.0/bin/tiff.dll",
+          "type": "FILEPATH"
+        }
+      ]
+    }
+  ]
+}

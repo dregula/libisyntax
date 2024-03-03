@@ -10,3 +10,8 @@ build/
 *.isyntax
 *.json
 *.xml
+/.vs/libisyntax/v17
+/.vs
+/isyntax_example.pdb
+*.pdb
+*.ilk

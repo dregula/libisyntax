@@ -1,0 +1,148 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+	"configurations": [
+		{
+			"type": "isyntax_example [help]",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax_example.exe)",
+			"name": "isyntax_example.exe [help]"
+		},
+		{
+			"type": "isyntax_example levels and tiles",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax_example.exe)",
+			"name": "isyntax_example.exe PAS.isyntax levels and tiles",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax"
+			]
+		},
+		{
+			"type": "isyntax_example label",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax_example.exe)",
+			"name": "isyntax_example.exe export label",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"label",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_label.jpg"
+			]
+		},
+		{
+			"type": "isyntax_example macro",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax_example.exe)",
+			"name": "isyntax_example.exe export macro",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"macro",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_macro.jpg"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff [help]",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe [help]"
+		},
+		{
+			"type": "isyntax-to-tiff level4 JPEG",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level4 (of7) 512x512 JPEG cache:1G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level4_512x512_JPEG80_cache1G.tiff",
+				"--start-at-page 4",
+				"--tile-size 512",
+				"--compression JPEG",
+				"--quality 80",
+				" --cache-size 1G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level3 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level3 (of7) 1024x1024 LZW cache:1G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level3_1024-1024_LZW_cache1G.tiff",
+				"--start-at-page 3",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 1G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level3 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level3 (of7) 1024x1024 LZW cache:10G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level3_1024-1024_LZW_cache10G.tiff",
+				"--start-at-page 3",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 10G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level2 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level2 (of7) 1024x1024 LZW cache:10G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level2_1024-1024_LZW_cache10G.tiff",
+				"--start-at-page 2",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 10G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level2 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level2 (of7) 1024x1024 LZW cache:10G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level2_1024-1024_LZW_cache10G.tiff",
+				"--start-at-page 2",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 10G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level1 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level1 (of7) 1024x1024 LZW cache:1G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level1_1024-1024_LZW_cache1G.tiff",
+				"--start-at-page 1",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 1G"
+			]
+		},
+		{
+			"type": "isyntax-to-tiff level0 LZW",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff.exe (C:\\Users\\regula\\source\\dregula\\libisyntax\\isyntax-to-tiff.exe)",
+			"name": "isyntax-to-tiff.exe level0 (of7) 1024x1024 LZW cache:10G",
+			"args": [
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS.iSyntax",
+				"C:\\Users\\regula\\source\\iSyntax_test_materials\\PAS_level0_1024-1024_LZW_cache10G.tiff",
+				"--start-at-page 0",
+				"--tile-size 1024",
+				"--compression LZW",
+				" --cache-size 10G"
+			]
+		}
+	]
+}
