@@ -1,0 +1,170 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+	"configurations": [
+		{
+			"type": "cppgdb",
+			"name": "isyntax_example [help]",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [],
+			"env": {}
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax_example show levels and tiles",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax_example write a tile to output",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"5",
+				"5",
+				"5",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_tile_5_5x5.png"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax_example write label",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"label",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_label.jpg"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax_example write macro",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax_example",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"macro",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_macro.jpg"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff [help]",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": []
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff level=5 compression=JPEG cache=1G",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_level5_JPEG80_cache1G_.tiff",
+				"--start-at-page",
+				"5",
+				"--compression",
+				"JPEG",
+				"--quality",
+				"80",
+				"--cache-size",
+				"1G"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff level=5 compression=LZW cache=1G",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_level5_LZW_cache1G_.tiff",
+				"--start-at-page",
+				"5",
+				"--compression",
+				"LZW",
+				"--cache-size",
+				"1G"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff level=3 compression=LZW cache=1G",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_level3_LZW_cache1G_.tiff",
+				"--start-at-page",
+				"3",
+				"--compression",
+				"LZW",
+				"--cache-size",
+				"1G"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff level=2 compression=LZW cache=1G",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_level2_LZW_cache1G_.tiff",
+				"--start-at-page",
+				"2",
+				"--compression",
+				"LZW",
+				"--cache-size",
+				"1G"
+			]
+		},
+		{
+			"type": "cppgdb",
+			"name": "isyntax-to-tiff level=1 compression=LZW cache=1G",
+			"project": "CMakeLists.txt",
+			"projectTarget": "isyntax-to-tiff",
+			"comment": "block_alloc(): out of memory;used-chunks=32",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS.isyntax",
+				"/mnt/u/regula/source/iSyntax_test_materials/PAS_level1_LZW_cache1G_.tiff",
+				"--start-at-page",
+				"1",
+				"--compression",
+				"LZW",
+				"--cache-size",
+				"1G"
+			],
+			"env": {}
+		}
+	]
+}
