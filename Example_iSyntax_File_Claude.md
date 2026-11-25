@@ -1,6 +1,6 @@
 # Example iSyntax file (`example_isyntax_files/1.isyntax`): analysis
 
-File: `/mnt/u/regula/source/dregula/example_isyntax_files/1.isyntax`, 88,928,078 bytes, dated 2020-05-11. This is the first real file with codeblocks, so it is the first time the Quantizer/Deadzone predictions in the earlier documents could be tested on data. Companions: [Philips_Compression_Code_Samples_Claude.md](Philips_Compression_Code_Samples_Claude.md) (the algorithm), [Example_FIC_Files_Claude.md](Example_FIC_Files_Claude.md) (the sample headers), [Image_Format_Code_Samples_Claude.md](Image_Format_Code_Samples_Claude.md) (Philips' file reader), [CLAUDE.md](CLAUDE.md).
+File: `$SOURCEROOT/example_isyntax_files/1.isyntax`, 88,928,078 bytes, dated 2020-05-11. This is the first real file with codeblocks, so it is the first time the Quantizer/Deadzone predictions in the earlier documents could be tested on data. Companions: [Philips_Compression_Code_Samples_Claude.md](Philips_Compression_Code_Samples_Claude.md) (the algorithm), [Example_FIC_Files_Claude.md](Example_FIC_Files_Claude.md) (the sample headers), [Image_Format_Code_Samples_Claude.md](Image_Format_Code_Samples_Claude.md) (Philips' file reader), [CLAUDE.md](CLAUDE.md).
 
 **Evidence labels:** **[ran]** = I executed it; **[derived]** = computed from the results; **[inferred]** = deduction. Scripts are in [tools/v1_analysis/](tools/v1_analysis/). Nothing was written next to your file, and the decoder in `src/` was not touched.
 
@@ -194,7 +194,7 @@ The decoder has two colour paths (Philips_Compression_Code_Samples_Claude.md §6
 - The differences are small but not tiny: R and B differ by 0 to 2 levels (mean 0.80), G by 0 to 1 (mean 0.37).
 - The cause is how common negative odd chroma values are in this H&E slide: 53% of pixels have Cg < 0 (36.5% negative and odd), 75% have Co < 0 (43% negative and odd).
 
-So the earlier statement that the scalar path matters only for "tail pixels" understates it. **Which path runs decides the output of most pixels, by up to two levels.** **Which path runs depends on the build system (checked in `build/compile_commands.json`):** the CMake build uses `-march=native`, so `__SSSE3__` is defined and the vectorised floor path handles every 256-wide row; the Meson build adds no `-march` flag on x86 (the existing `build/` used plain `-O3`), so only `__SSE2__` is defined and the **truncating scalar path converts every pixel**. The same file therefore decodes to different pixels with `meson` and with `cmake` builds. `CLAUDE.md` describes how to run both and store the output. This file cannot say which rounding Philips' own viewer uses, since the transform is a bijection for either rounding; that needs the Philips viewer or its reference output.
+So the earlier statement that the scalar path matters only for "tail pixels" understates it. **Which path runs decides the output of most pixels, by up to two levels.** **Which path runs depends on the build system (checked in `builddir/compile_commands.json`):** the CMake build uses `-march=native`, so `__SSSE3__` is defined and the vectorised floor path handles every 256-wide row; the Meson build adds no `-march` flag on x86 (the existing `builddir/` used plain `-O3`), so only `__SSE2__` is defined and the **truncating scalar path converts every pixel**. The same file therefore decodes to different pixels with `meson` and with `cmake` builds. `CLAUDE.md` describes how to run both and store the output. This file cannot say which rounding Philips' own viewer uses, since the transform is a bijection for either rounding; that needs the Philips viewer or its reference output.
 
 ### 9.2 What the reconstruction does not show
 
@@ -204,5 +204,5 @@ So the earlier statement that the scalar path matters only for "tail pixels" und
 
 ## 10. Housekeeping notes
 
-- `.venv/` (Python 3.14 with numpy) sits inside the repository folder; `git status` does not list it, because it carries its own `.gitignore`. The scratch arrays I wrote to `/mnt/u/regula/source/dregula/_scratch_recon/` (3 GB) were deleted at the end of this session.
+- `.venv/` (Python 3.14 with numpy) sits inside the repository folder; `git status` does not list it, because it carries its own `.gitignore`. The scratch arrays I wrote to `$SOURCEROOT/_scratch_recon/` (3 GB) were deleted at the end of this session.
 - Tools added in [tools/v1_analysis/](tools/v1_analysis/): `layout.py`, `compare_v1_v2.py`, `stream_stats.py`, `reconstruct_np.py` (plus the earlier `parse_v1.py`, `hulsken_v1.py`, `exhaustive.py`). All are read-only with respect to the input files.

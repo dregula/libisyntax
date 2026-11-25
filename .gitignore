@@ -3,6 +3,7 @@ cmake-build*/
 .claude/
 release/
 build/
+builddir/
 reconfigure/
 *.exe
 *.dll
@@ -13,3 +14,4 @@ reconfigure/
 *.json
 *.xml
 
+.vscode/settings.json

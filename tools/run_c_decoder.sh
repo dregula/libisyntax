@@ -6,7 +6,7 @@
 #   tools/run_c_decoder.sh <variant> [isyntax_file]
 #
 #   variant:
-#     meson-default  existing ./build (Meson, plain -O3). x86 gets only __SSE2__  => SCALAR YCoCg path (truncating "/2")
+#     meson-default  existing ./builddir (Meson, plain -O3). x86 gets only __SSE2__  => SCALAR YCoCg path (truncating "/2")
 #     meson-ssse3    ./build-ssse3 (Meson, -mssse3)                               => SIMD   YCoCg path (floor ">>1")
 #     cmake-native   ./cmake-build (CMake adds -march=native)                     => SIMD   YCoCg path (floor ">>1")
 #   isyntax_file: default ../example_isyntax_files/1.isyntax (relative to the repository root)
@@ -25,7 +25,7 @@ OUTROOT="$(readlink -m "${C_DECODER_OUTPUT:-$REPO/../c_decoder_output}")"
 
 case "$VARIANT" in
   meson-default)
-    BUILD="$REPO/build"
+    BUILD="$REPO/builddir"
     ninja -C "$BUILD"
     EXAMPLE="$BUILD/isyntax_example"; TOTIFF="$BUILD/isyntax-to-tiff"
     EXPECT="scalar YCoCg->RGB path (truncating /2); no -march flag, __SSE2__ only"

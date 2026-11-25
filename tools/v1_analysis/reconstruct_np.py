@@ -81,11 +81,13 @@ for c in range(3):
         # next L: L[n] = out[n-1]
         nxt = np.zeros_like(out); nxt[1:, 1:] = out[:-1, :-1]
         cur = nxt
+        del HL, LH, HH, lowrows, highrows, nxt; del H[(c, s)]   # memory only: free this scale's coefficients (WSL has ~15 GB)
         print(f'  colour {c} scale {s}: out {out.shape} t={time.time()-t0:.0f}s', flush=True)
         if s == 0: final = out
     # pixels: pixel[p] = out[p-1]
     pix = np.zeros((Hp, Wp), dtype=np.int32); pix[1:, 1:] = final[:Hp - 1, :Wp - 1]
-    planes_full.append(pix[pad:Hp - pad, pad:Wp - pad].copy()); del final, pix, out, cur
+    _v = pix[pad:Hp - pad, pad:Wp - pad]; assert -32768 <= int(_v.min()) and int(_v.max()) <= 32767   # memory only: keep finished planes as int16
+    planes_full.append(_v.astype(np.int16)); del final, pix, out, cur, _v
 Y, Co, Cg = planes_full
 h, w = Y.shape
 if os.environ.get('SAVE_PLANES'):
@@ -104,7 +106,7 @@ acc = collections.Counter(); sums = np.zeros(3); dmin = np.array([9, 9, 9]); dma
 band = 1024; prev_rows = []; crop = None
 ph = (h // DS) * DS; pw = (w // DS) * DS
 for y0 in range(0, h, band):
-    sl = slice(y0, min(h, y0 + band)); Yb, Cob, Cgb = Y[sl], Co[sl], Cg[sl]
+    sl = slice(y0, min(h, y0 + band)); Yb, Cob, Cgb = Y[sl].astype(np.int32), Co[sl].astype(np.int32), Cg[sl].astype(np.int32)
     acc['pixels'] += Yb.size; acc['Y_negative'] += int((Yb < 0).sum())
     Ya = np.abs(Yb)
     Rf, Gf, Bf = rgb(Ya, Cob, Cgb, 'floor'); Rt, Gt, Bt = rgb(Ya, Cob, Cgb, 'trunc'); Rn, Gn, Bn = rgb(Yb, Cob, Cgb, 'floor')

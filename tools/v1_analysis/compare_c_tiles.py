@@ -2,7 +2,7 @@
 # reconstruction (reconstruct_np.py with SAVE_PLANES=1). Level-0 tiles only. Needs numpy.
 #   <venv>/python3 -I compare_c_tiles.py <run_folder_with_tiles> <planes_dir_with_Y.npy_Co.npy_Cg.npy>
 # For each level-0 tile it searches a small window of pixel offsets around the predicted position
-# (tile pixel j <-> padded column 256*tx + j + 1, i.e. valid-region column 256*tx + j + 1 - pad) and reports, for the best offset,
+# (tile pixel j <-> padded column 256*tx + j + 1 as first guessed; MEASURED best offset is (-1,-1), i.e. padded column 256*tx + j, valid-region column 256*tx + j - pad) and reports, for the best offset,
 # the fraction of pixels whose RGB is identical to the numpy result under the two YCoCg-R roundings:
 #   floor (">>1", the SIMD path)  and  trunc ("/2", the scalar path).  The better match tells which path the C build used.
 import sys, os, re, zlib, struct, glob

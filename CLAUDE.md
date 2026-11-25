@@ -13,6 +13,10 @@ The owner wants to understand, at the bit level:
 
 Prefer explaining and annotating over refactoring. Do not change decoder behavior unless asked: the regression tests compare decoded pixels against known output.
 
+### Path convention
+
+The parent folder of this repository (the one that holds `libisyntax/`, `example_isyntax_files/`, `c_decoder_output/` and `third_party_documentation/`) is written as `$SOURCEROOT` in this repository. Each developer sets that environment variable outside the repository (it is deliberately not committed). Relative paths such as `../example_isyntax_files/` also work from the repo root.
+
 ### Companion material (outside this repo)
 
 | Path | Contents |
@@ -51,13 +55,13 @@ Still open:
 
 ## Build / run
 
-Two build systems (keep both working): CMake and Meson. Output binaries land in the repo root (CMake) or `build/` (Meson).
+Two build systems (keep both working): CMake and Meson. Output binaries land in the repo root (CMake) or `builddir/` (Meson).
 
 ```bash
-# Meson (a configured ./build exists)
-meson setup build            # first time; add -Dtests=true for tests
-ninja -C build
-meson test -C build          # needs a test slide, see test/fetch.py
+# Meson (a configured ./builddir exists)
+meson setup builddir         # first time; add -Dtests=true for tests
+ninja -C builddir
+meson test -C builddir          # needs a test slide, see test/fetch.py
 
 # CMake
 cmake -B cmake-build -DCMAKE_BUILD_TYPE=Release && cmake --build cmake-build
@@ -67,10 +71,10 @@ cmake -B cmake-build -DCMAKE_BUILD_TYPE=Release && cmake --build cmake-build
 Targets: `libisyntax` (shared lib), `isyntax_example` (tile/region dump, PNG), `isyntax-to-tiff` (needs libtiff), `isyntax-dirwalk`, `thread_test`.
 
 Notes:
-- **The two build systems select different code paths (measured, see Example_iSyntax_File_Claude.md §9.1 and `build/compile_commands.json`).** CMake adds `-march=native`, so on this machine (ssse3 + avx2) `__SSSE3__` is defined and the YCoCg->RGB conversion runs the **SIMD floor (`>>1`)** path. The Meson build adds **no `-march` flag on x86** (only on Apple Silicon): the existing `build/` was compiled with plain `-O3`, only `__SSE2__` is defined, and the conversion runs the **scalar truncating (`/2`)** path. The wavelet lifting is integer and bit-exact in every variant, but the two colour paths give different RGB for about 64% of the pixels of the real file (R and B by up to 2 levels, G by up to 1). **Always record which build produced a decoder output.** To get the SIMD path from Meson use `meson setup build-ssse3 -Dc_args=-mssse3`.
+- **The two build systems select different code paths (measured, see Example_iSyntax_File_Claude.md §9.1 and `builddir/compile_commands.json`).** CMake adds `-march=native`, so on this machine (ssse3 + avx2) `__SSSE3__` is defined and the YCoCg->RGB conversion runs the **SIMD floor (`>>1`)** path. The Meson build adds **no `-march` flag on x86** (only on Apple Silicon): the existing `builddir/` was compiled with plain `-O3`, only `__SSE2__` is defined, and the conversion runs the **scalar truncating (`/2`)** path. The wavelet lifting is integer and bit-exact in every variant, but the two colour paths give different RGB for about 64% of the pixels of the real file (R and B by up to 2 levels, G by up to 1). **Always record which build produced a decoder output.** To get the SIMD path from Meson use `meson setup build-ssse3 -Dc_args=-mssse3`.
 - CMake also changes `VREG_INT_COUNT` (AVX2/SSE lifting paths) and uses NEON on Apple Silicon.
-- `.gitignore` excludes `*.json *.xml *.isyntax build/ .claude/ reconfigure/`. A `.gitignore` edit is currently uncommitted.
-- There is no real `.isyntax` test data in the repo. `test/fetch.py` downloads it and `test/expected_output/` holds the references. One real file is available outside the repo: `/mnt/u/regula/source/dregula/example_isyntax_files/1.isyntax` (v1 data model, same scan as `1.fic`). Read-only Python analysis tools for such files are in `tools/v1_analysis/` (plus `tools/run_c_decoder.sh`, see "Running the C decoder" below); they include an independent numpy reconstruction of the full image (needs the repo's `.venv`, Python 3.14 + numpy).
+- `.gitignore` excludes `*.json *.xml *.isyntax build/ builddir/ .claude/ reconfigure/`. A `.gitignore` edit is currently uncommitted.
+- There is no real `.isyntax` test data in the repo. `test/fetch.py` downloads it and `test/expected_output/` holds the references. One real file is available outside the repo: `$SOURCEROOT/example_isyntax_files/1.isyntax` (v1 data model, same scan as `1.fic`). Read-only Python analysis tools for such files are in `tools/v1_analysis/` (plus `tools/run_c_decoder.sh`, see "Running the C decoder" below); they include an independent numpy reconstruction of the full image (needs the repo's `.venv`, Python 3.14 + numpy).
 
 ## Running the C decoder and storing its output for Claude
 
@@ -79,7 +83,7 @@ Notes:
 **Where the output goes** (outside the repository, next to the other example folders; override with `C_DECODER_OUTPUT`):
 
 ```
-/mnt/u/regula/source/dregula/c_decoder_output/
+$SOURCEROOT/c_decoder_output/
   reference_numpy/                     Y.npy Co.npy Cg.npy  (int16 planes of the numpy reconstruction, ~3.2 GB; see step 1)
   <YYYYMMDD_HHMMSS>_<variant>_<file>/  one folder per run, never overwritten
       RUN.txt         date, variant, build flags, compiler, git commit, CPU flags, input name/size/sha256, every command, file list
@@ -105,14 +109,14 @@ SAVE_PLANES=1 .venv/bin/python3 -I tools/v1_analysis/reconstruct_np.py ../exampl
 
 | variant | build | YCoCg->RGB path expected |
 |---|---|---|
-| `meson-default` | existing `./build` (`ninja -C build`) | scalar, truncating `/2` |
+| `meson-default` | existing `./builddir` (`ninja -C builddir`) | scalar, truncating `/2` |
 | `meson-ssse3` | `./build-ssse3` (`meson setup build-ssse3 -Dc_args=-mssse3`) | SIMD, floor `>>1` |
 | `cmake-native` | `./cmake-build` (CMake, `-march=native`) | SIMD, floor `>>1` |
 
 Recommended: run `meson-default` first (it is the build that already exists) and then `cmake-native`; the two should differ in about 64% of pixels, which tests the rounding finding.
 
 ```bash
-cd /mnt/u/regula/source/dregula/libisyntax
+cd $SOURCEROOT/libisyntax
 tools/run_c_decoder.sh meson-default                 # default input: ../example_isyntax_files/1.isyntax
 tools/run_c_decoder.sh cmake-native
 # optional: more tiles, or the full lossless TIFF (large and slow)
@@ -122,22 +126,24 @@ FULL_TIFF=1 tools/run_c_decoder.sh cmake-native
 
 The script writes level 0 tiles (35,35) (36,35) (35,36) (36,36) at a tissue edge, (60,40) tissue interior, (10,10) blank glass, (97,50) the edge of the scanned area, level 2 tile (15,9), level 3 tile (7,4), and **all 12 tiles of level 5** (the whole slide at 1/32 resolution, 4 x 3 tiles). Tile coordinates are `<level> <tile_x> <tile_y>` in that level's tile grid; level 0 is full resolution.
 
-**Manual equivalent** (one tile; the example program is `build/isyntax_example`, or `./isyntax_example` for CMake):
+**Manual equivalent** (one tile; the example program is `builddir/isyntax_example`, or `./isyntax_example` for CMake):
 
 ```bash
-build/isyntax_example FILE                              # metadata + levels
-build/isyntax_example FILE <level> <tile_x> <tile_y> out.png
-build/isyntax_example FILE label label.jpg              # and: macro macro.jpg
-build/isyntax-to-tiff FILE out.tif --compression LZW    # lossless; JPEG is lossy, do not use it for comparisons
+builddir/isyntax_example FILE                              # metadata + levels
+builddir/isyntax_example FILE <level> <tile_x> <tile_y> out.png
+builddir/isyntax_example FILE label label.jpg              # and: macro macro.jpg
+builddir/isyntax-to-tiff FILE out.tif --compression LZW    # lossless; JPEG is lossy, do not use it for comparisons
 ```
 
-**Step 3: tell Claude the run folder**, e.g. "C decoder output is in /mnt/u/regula/source/dregula/c_decoder_output/20261125_101500_meson-default_1". Claude will run
+**Step 3: tell Claude the run folder**, e.g. "C decoder output is in $SOURCEROOT/c_decoder_output/20261125_101500_meson-default_1". Claude will run
 
 ```bash
 .venv/bin/python3 -I tools/v1_analysis/compare_c_tiles.py <run_folder> ../c_decoder_output/reference_numpy
 ```
 
-which, for every level 0 tile, finds the pixel offset between the C tile and the numpy planes, and reports the percentage of identical RGB pixels under the floor and truncating roundings. Expected: about 100% for the variant that matches the build's colour path (and about 35% for the other), with the offset confirming the tile-to-pixel mapping `valid column = 256*tx + j + 1 - 189`. The level 2, 3 and 5 tiles and the label/macro images are kept for later checks (level 5 shows the slide at 1/32 resolution; the macro image is the scanner thumbnail).
+which, for every level 0 tile, finds the pixel offset between the C tile and the numpy planes, and reports the percentage of identical RGB pixels under the floor and truncating roundings. Expected: about 100% for the variant that matches the build's colour path (and about 35% for the other), with a best offset of (dx=-1, dy=-1) relative to the script's prediction. **Measured (run 20261125_141312_cmake-native, 7 level 0 tiles, all 100.00% identical under the floor path):** the real mapping is `valid column = 256*tx + j - 189` (padded column `256*tx + j`, no `+1`); the script's prediction `+ 1` was off by one and `compare_c_tiles.py` searches around it. The level 2, 3 and 5 tiles and the label/macro images are kept for later checks (level 5 shows the slide at 1/32 resolution; the macro image is the scanner thumbnail).
+
+**Measured results (2026-11-25, both runs in `../c_decoder_output/`):** `20261125_141312_cmake-native_1` matches the numpy reconstruction 100.00% under the floor (`>>1`) path and `20261125_142012_meson-default_1` matches 100.00% under the truncating (`/2`) path, on all 7 level 0 tiles (best offset (-1,-1) in both). Comparing the two C runs directly, 62-68% of pixels differ in busy level 0 tiles (RGB difference 0 to 2), 29% in the tile at the edge of the scanned area, 2% in blank-glass level 5 tiles; this reproduces the 64.5% predicted from the numpy planes. So the two build systems really do give different pixels, and the finding in the Build notes is confirmed on C output. `20261125_142126_meson-ssse3_1` (Meson with `-mssse3`) also matches 100.00% under the floor path on all 7 level 0 tiles, and all its 21 tile PNGs plus label.jpg and macro.jpg are byte-identical to the cmake-native run: so the colour path is decided by `__SSSE3__` alone, and the other CMake/Meson differences (`-march=native`, AVX2 lifting) change no output byte. Only level 0 tiles were checked against numpy; level 2, 3, 5 and label/macro are kept but unchecked.
 
 **Rules.** Keep every run folder (they are small without the TIFF). Never edit the input file or the decoder to produce output; if you change the code, say so in the message, because `RUN.txt` records the git commit and the number of dirty `src/` files. `RUN.txt` must stay with the images: the build variant is the key to interpreting any pixel difference. If a build step fails (for example `meson` or `libtiff` missing; the TIFF tool is only built when libtiff is found), the log is in the terminal; `isyntax_example` alone is enough for everything above.
 
