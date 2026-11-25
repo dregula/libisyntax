@@ -44,6 +44,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 // End of OpenJPEG copyright notice.
+// -----------------------------------------------------------------------------------------------------
+// Notes added for this fork (comments only; the code below is unchanged OpenJPEG-derived code).
+//
+// What this is: the reversible integer 5/3 (LeGall) INVERSE lifting transform of OpenJPEG, one dimension at a time.
+//   Inverse steps (">>" is an arithmetic shift, i.e. floor):
+//       even (low-pass derived) sample:  x_even = s - ((d_prev + d_next + 2) >> 2)
+//       odd  (high-pass derived) sample: x_odd  = d + ((x_even_prev + x_even_next) >> 1)
+//   Forward (Philips liftwave('rbio2.2','Int2Int') with rounding 'up' = floor(y + 0.5)) is the exact inverse:
+//       d = x_odd - floor((x_even_prev + x_even_next) / 2);   s = x_even + floor((d_prev + d_next + 2) / 4)
+//   so the integer rounding is identical to the JPEG 2000 reversible 5/3 (T.800 annex F), bit for bit.
+//
+// Buffer layout expected by these routines: [ low band: sn values | high band: dn values ] (len = sn + dn) per row or
+// column; the routine interleaves them in place. `cas` is the parity of the first output sample: cas = 0 starts with a
+// low-pass sample on an even coordinate, cas = 1 starts with a high-pass sample. NAMING CAUTION in the cas = 1 routines:
+// in_odd (= tiledp[0 .. sn)) is the LOW band, which lands on odd output positions, and in_even (= tiledp[sn ..]) is the
+// HIGH band, which lands on even positions.
+//
+// iSyntax always calls these with cas = 1 (isyntax_idwt in isyntax.c). Reason: Philips' encoder keeps only "valid"
+// coefficients of a zero-padded image; at the first level the first valid high-pass coefficient is at padded position 1
+// (odd) and the first valid low-pass one at position 2, so every level's interleaved stream begins with a high-pass
+// sample. (Derivation and checks: Philips_Compression_Code_Samples_Claude.md section 5.3.)
+//
+// Edges: lifting at the two ends of a row/column uses whole-sample symmetric extension, as in JPEG 2000. In iSyntax the
+// samples affected are inside the 4-coefficient margins copied from neighbouring tiles and are discarded by the caller,
+// so the output tile equals the transform of the continuous (unsplit) image. Plain per-tile JPEG 2000 coefficients differ
+// from iSyntax coefficients near every tile edge for this reason, even though the filter is the same.
+//
+// 16-bit caution: with DWT_COEFF_BITS == 16 the SIMD paths add and shift in 16-bit lanes (they wrap), while the scalar
+// vertical paths compute in 32 bits. They agree as long as intermediate values stay far below 32767; on the real file the
+// largest intermediate magnitude over all levels was 282.
+// -----------------------------------------------------------------------------------------------------
 
 #if (DWT_COEFF_BITS==16)
 #ifdef __AVX2__
@@ -66,6 +97,8 @@
 /** Number of columns that we can process in parallel in the vertical pass */
 #define PARALLEL_COLS_53     (2*VREG_INT_COUNT)
 
+// sn / dn: number of low-pass / high-pass values; cas: 0 = the first output sample is low-pass (even coordinate),
+// 1 = it is high-pass (odd coordinate). iSyntax uses cas = 1 for both directions.
 typedef struct dwt_local {
 	icoeff_t* mem;
 	i32 dn;   /* number of elements in high pass band */

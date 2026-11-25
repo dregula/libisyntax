@@ -63,6 +63,14 @@
 #include "stb_image.h"
 #endif
 
+// Orientation notes for this fork are at the top of isyntax.h (file layout, geometry, quantization/deadzone, colour).
+// Short version of the decode pipeline implemented in this file:
+//   isyntax_open():     read XML header -> parse (isyntax_parse_xml_header) -> block table / seektable or cluster table
+//                       -> codeblock list, data chunks, per-level tile grid
+//   isyntax_hulsken_decompress():  one codeblock -> 1 or 3 arrays of 128 x 128 i16 coefficients (no dequantization)
+//   isyntax_idwt_tile_for_color_channel(): stitch a tile's subbands plus 4-coefficient margins from 8 neighbours,
+//                       integer 5/3 inverse (isyntax_dwt.c), donate the result as LL to the 4 children tiles,
+//                       and (for the requested tile) convert YCoCg-R to RGB.
 // Enable/disable debug routines for creating PNGs of IDWT steps
 #define ISYNTAX_WANT_DEBUG_OUTPUT_PNG 0
 #if ISYNTAX_WANT_DEBUG_OUTPUT_PNG
@@ -74,6 +82,13 @@
 
 #include <ctype.h>
 
+// PER_LEVEL_PADDING = 3 for the 5/3 wavelet. It follows from the filter support (low-pass taps -2..2, high-pass
+// taps -1..1) and from the encoder's rule of keeping only "valid" coefficients (Philips MATLAB:
+// validwaveletcoefficientposition.m, waveletzeropadding.m): the image is zero-padded by
+// 3 * (2^L - 1) = (3 << L) - 3 pixels per side for L levels (this is level0_padding below), and the first valid
+// coefficient at scale s lies at (3 << s) - 2 (H) and (3 << s) - 2 + (1 << s) (LL). Checked on all six sample headers
+// (padding 189 / 765 / 1533 for 6 / 8 / 9 levels equals the start of the valid-data envelope) and, by an independent
+// numpy reconstruction, on the real file.
 #define PER_LEVEL_PADDING 3
 
 #include "isyntax_dwt.c"
@@ -626,6 +641,18 @@ static bool isyntax_parse_scannedimage_child_node(isyntax_t* isyntax, u32 group,
 				case 0x1016: /*DP_CLAHE_CLIP_LIMIT_Y16*/                    {} break;
 				case 0x1017: /*DP_CLAHE_NR_BINS_Y16*/                       {} break;
 				case 0x1018: /*DP_CLAHE_CONTEXT_DIMENSION_Y16*/             {} break;
+				// The four wavelet quantizer elements below (0x1019 .. 0x101C) are deliberately ignored: they describe what the
+				// scanner's ENCODER did to the wavelet coefficients before Hulsken coding, and the decoder needs none of it.
+				//   Encoder (Philips quantanddeadzone.m), per colour group and per level, applied to HL, LH and HH only:
+				//       if abs(c) <= deadzone then c = 0;                     // deadzone first (the spec's "greater or equal" is wrong)
+				//       c = fix(c / 2^quantizer) * 2^quantizer;               // then truncate toward zero to a multiple of 2^quantizer
+				//   LL is never quantized, and levels beyond the table are left alone. Nothing is divided out, so the decoded
+				//   values are already in their final scale: there is no dequantization or reconstruction offset anywhere in the
+				//   decoder. In the bitplane domain the lowest `quantizer` magnitude planes are always empty and are not stored,
+				//   and every nonzero value has abs(c) >= deadzone.
+				//   Mapping: PerColor[0] = Y, PerColor[1] = Co and Cg; PerLevel[0] = level 0 = scale 0 (finest). Philips "Quality=2"
+				//   ("Q2") gives Y (Q,DZ) = (1,2) then (0,0); Co/Cg = (4,16), (2,8), (0,0); the sample headers carry exactly this.
+				//   Verified on the real file for all 17626 non-empty codeblocks (see Example_iSyntax_File_Claude.md section 3).
 				case 0x1019: /*DP_WAVELET_QUANTIZER_SETTINGS_PER_COLOR*/    {} break;
 				case 0x101A: /*DP_WAVELET_QUANTIZER_SETTINGS_PER_LEVEL*/    {} break;
 				case 0x101B: /*DP_WAVELET_QUANTIZER*/                       {} break;
@@ -689,6 +716,8 @@ static bool isyntax_parse_scannedimage_child_node(isyntax_t* isyntax, u32 group,
 							case 3: {
 								image->level_count = range.numsteps;
 								image->max_scale = range.numsteps - 1;
+                                // Padding on each side of the level-0 image: (3 << level_count) - 3 = 3 * (2^L - 1) (see PER_LEVEL_PADDING).
+                                // width / height below are therefore the padded size minus twice this (6 levels: 189; 8: 765; 9: 1533).
                                 image->level0_padding = (PER_LEVEL_PADDING << range.numsteps) - PER_LEVEL_PADDING;
                                 image->width = image->width_including_padding - 2 * image->level0_padding;
                                 image->height = image->height_including_padding - 2 * image->level0_padding;
@@ -724,6 +753,9 @@ static bool isyntax_parse_scannedimage_child_node(isyntax_t* isyntax, u32 group,
 						parse_up_to_five_integers(value, (i32*)template->relative_coords_for_codeblock_in_cluster[isyntax->parser.block_header_index_for_cluster].raw_coords);
 					}
 				} break;
+				// 16 = Hulsken compressor version 1, 19 = version 2 (the spec calls them "hulsken" and "hulsken2"). All sample files
+				// use 16, even those with the v2 container layout (data model 100.4): container version and compressor version
+				// are independent. Differences are listed at isyntax_hulsken_decompress().
 				case 0x200F: /*UFS_IMAGE_BLOCK_COMPRESSION_METHOD*/         {
 					i32 compression_method = atoi(value);
 					if (compression_method == 16) {
@@ -743,6 +775,14 @@ static bool isyntax_parse_scannedimage_child_node(isyntax_t* isyntax, u32 group,
 					}
 				} break;
 				case 0x2013: /*UFS_IMAGE_PIXEL_TRANSFORMATION_METHOD*/      {} break;
+				// v1 layout (base64 in the XML), all little-endian, one DICOM-style item per codeblock:
+				//   u32 total size
+				//   repeat: FFFE,E000 + u32 item size (72 = "full" form, 40 = "partial" form)
+				//           301D,200E u32 20: x, y, colour, scale, coefficient (u32 each; coefficient 0 = LL, 1 = HL+LH+HH)
+				//           [ 301D,2010 u32 8: u64 data offset ]  [ 301D,2011 u32 8: u64 data size ]   <- only in the 72-byte form
+				//           301D,2012 u32 4: block header template id
+				// The real v1 file has the 40-byte form (so the offsets/sizes come from the seektable, see isyntax_open()). The table
+				// holds every block of the grid; blocks outside the scanned region are not stored in the file (offset 0).
 				case 0x2014: { /*UFS_IMAGE_BLOCK_HEADER_TABLE*/      // data model <100
 					// NOTE: mutually exclusive with UFS_IMAGE_BLOCK_HEADERS (either one or the other must be present)
 /*
@@ -818,6 +858,17 @@ static bool isyntax_parse_scannedimage_child_node(isyntax_t* isyntax, u32 group,
 				} break;
 				case 0x2016: /*UFS_IMAGE_CLUSTER_HEADER_TEMPLATES*/ {} break; // data model >= 100
 				case 0x2017: /*UFS_IMAGE_DIMENSIONS_OVER_CLUSTER*/  {} break;
+				// v2 layout (base64 in the XML), all little-endian: u32 total size, then one FFFE,E000 item per cluster ("chunk"):
+				//   301D,2019 (12 bytes)  u32 x, u32 y, u32 base scale of the cluster  (x and y include the +1 first-valid-pixel bias)
+				//   301D,201A u32         cluster header template id (which relative block layout the cluster follows)
+				//   301D,201B u64         file offset of the cluster data
+				//   301D,201C u64         size of the cluster data
+				//   301D,201D u32[n]      per codeblock: offset relative to the cluster data offset
+				//   301D,201E u32[n]      per codeblock: size
+				// n = 63, 66 or 18 depending on the cluster template. The codeblock identity (colour, scale, band group and position
+				// inside the cluster) comes from the cluster header template, in the same order as these arrays.
+				// Not described by the Philips spec or by Philips' Python/MATLAB samples; derived from this code and the sample headers.
+				// For the same scan this table and the v1 seektable agree on all 33867 (colour, scale, coefficient, offset, size) tuples.
 				case 0x201F: /*UFS_IMAGE_CLUSTER_HEADER_TABLE*/ { // data model >= 100
 /*
 					FILE* test_out = file_stream_open_for_writing("test_b64.out");
@@ -1550,6 +1601,10 @@ static bool isyntax_parse_xml_header(isyntax_t* isyntax, char* xml_header, i64 c
 // Convert between signed magnitude and two's complement
 // https://stackoverflow.com/questions/21837008/how-to-convert-from-sign-magnitude-to-twos-complement
 // N.B. This function is its own inverse (conversion works the other way as well)
+// Hulsken-coded coefficients are SIGN-MAGNITUDE: bit 15 is the sign plane and bits 14..0 the magnitude planes (the
+// encoder's bitserialize4x2 uses coef < 0 for the sign plane and abs(coef) for the rest). Conversion to two's
+// complement is needed before the lifting. A set sign bit with zero magnitude ("negative zero", 0x8000) becomes 0.
+// This function is its own inverse.
 static inline i16 signed_magnitude_to_twos_complement_16(u16 x) {
 	u16 m = -(x >> 15);
 	i16 result = (~m & x) | (((x & (u16)0x8000) - x) & m);
@@ -1597,6 +1652,8 @@ static void signed_magnitude_to_twos_complement_16_block(u16* data, u32 len) {
 
 // Convert a block of 16-bit signed integers to their absolute value
 // Almost the same as the signed magnitude <-> twos complement conversion, except the sign bit is cleared at the end
+// Used only for the Y channel of the output tile (isyntax.c, near "we actually need the absolute value"). Note the name:
+// it takes the absolute value of the value in sign-magnitude form, i.e. it clears the sign bit after conversion.
 static void signed_magnitude_to_absolute_value_16_block(i16* data, u32 len) {
     u32 aligned_len = (len / 8) * 8;
     u32 i = 0;
@@ -1660,6 +1717,20 @@ static u32 wavelet_coefficient_to_color_value(icoeff_t coefficient) {
 }
 #endif
 
+// Inverse of Philips' YCoCg-R lifting colour transform (forward: Co = R - B; tmp = B + Co/2; Cg = G - tmp; Y = tmp + Cg/2).
+// TWO rounding conventions for the "/2" exist and they give different pixels:
+//   - scalar C paths (here, and the tail of convert_ycocg_to_*_block): "/ 2" truncates toward zero. This matches
+//     Philips' CompressionCodeSamples (rgb2ycocg.m / ycocg2rgb.m use fix()).
+//   - SIMD/NEON paths (convert_ycocg_to_*_block): arithmetic shift ">> 1" floors. This matches Philips'
+//     ViewingCodeSamples (bitshift(x, -1)) and the viewing PDF.
+// They differ whenever Co or Cg is negative and odd. Measured on the real file (25222 x 21126 valid pixels, 53% have
+// Cg < 0 and 75% Co < 0): 64.5% of all pixels differ, R and B by 0..2 levels and G by 0..1.
+// WHICH PATH RUNS DEPENDS ON THE BUILD: the SIMD path needs __SSE2__ and __SSSE3__. CMake builds use -march=native
+// (SIMD, floor); the Meson build adds no -march flag on x86, so only __SSE2__ is defined and the scalar truncating path
+// converts every pixel. The transform is a bijection for either rounding, so the data cannot tell which one the
+// scanner's own viewer uses.
+// This function clamps only at the top (ATMOST(255, x)) and stores into u8: a negative result would wrap, whereas the
+// SIMD paths saturate at 0 and 255. On the real file no pixel went below 0 (about 0.35% exceed 255).
 static rgba_t ycocg_to_rgb(icoeff_t Y, icoeff_t Co, icoeff_t Cg) {
     icoeff_t tmp = Y - Cg/2;
     icoeff_t G = tmp + Cg;
@@ -1818,6 +1889,22 @@ static void convert_ycocg_to_rgba_block(icoeff_t* Y, icoeff_t* Co, icoeff_t* Cg,
 
 #define DEBUG_OUTPUT_IDWT_STEPS_AS_PNG 0
 
+// One level of the 2-D inverse integer 5/3 transform, in place, on a (2Q x 2Q) buffer of i16 coefficients laid out as
+//         LL | HL
+//         ---+---       each quadrant Q x Q (quadrant_width x quadrant_height); HL = horizontal high-pass,
+//         LH | HH       vertical low-pass, LH the opposite
+// The result is the LL band of the next finer scale (or the pixels at scale 0).
+//   - Order: horizontal pass on every row first, then the vertical pass on every column. This is the order of
+//     Philips' wavelet2dilift.m (the encoder's forward transform is vertical first, then horizontal; with integer
+//     rounding the order matters for bit-exactness).
+//   - Parity: cas = 1 in both passes. Within a row (or column) the first half is the low band and the second half the
+//     high band, and the interleaved output starts with a high-band sample: low samples land on odd positions, high
+//     samples on even positions. This follows from the encoder's valid-coefficient geometry (first valid H at an odd
+//     padded coordinate, first valid L at the next even one; see the notes in isyntax.h and in isyntax_dwt.c).
+//   - The buffer includes margins from neighbouring tiles; samples near the buffer edges are contaminated by the
+//     symmetric extension of the lifting routines and are discarded by the caller (ISYNTAX_IDWT_FIRST_VALID_PIXEL).
+// An independent whole-level numpy implementation of the same arithmetic reproduces the real file as a seam-free
+// image (Example_iSyntax_File_Claude.md section 9).
 void isyntax_idwt(icoeff_t* idwt, i32 quadrant_width, i32 quadrant_height, bool output_steps_as_png, const char* png_name) {
 	i32 full_width = quadrant_width * 2;
 	i32 full_height= quadrant_height * 2;
@@ -1968,6 +2055,16 @@ bool isyntax_is_parent_tile_missing(isyntax_image_t* wsi, i32 scale, i32 tile_x,
 	}
 }
 
+// Inverse transform of ONE tile and ONE colour channel (color 0 = Y, 1 = Co, 2 = Cg).
+//   1. Build a (2 * (block + 8)) x (2 * (block + 8)) buffer of the four quadrants LL, HL, LH, HH, each block + 8 wide:
+//      the tile's own 128 x 128 block plus 4 coefficients of margin on every side taken from the 8 neighbouring tiles
+//      of the same scale (this is why neighbours must be loaded). Missing H blocks are zero ("black"); a missing LL is a
+//      dummy: white (255) for Y, 0 for Co and Cg. Tiles that were never scanned decode to blank background.
+//   2. isyntax_idwt() on the buffer.
+//   3. The valid centre of the result (offset ISYNTAX_IDWT_FIRST_VALID_PIXEL) is 2 * block = 256 pixels wide. It is
+//      split into four 128 x 128 LL blocks that are donated to the four children tiles of the next finer scale, and
+//      (only for the requested tile) converted to RGB.
+// At scale 0 the output is pixels directly; at scale s the tile covers 256 * 2^s level-0 pixels per side.
 u32 isyntax_idwt_tile_for_color_channel(isyntax_t* isyntax, isyntax_image_t* wsi, i32 scale, i32 tile_x, i32 tile_y, i32 color, icoeff_t* dest_buffer) {
 	isyntax_level_t* level = wsi->levels + scale;
 	ASSERT(tile_x >= 0 && tile_x < level->width_in_tiles);
@@ -2394,6 +2491,9 @@ void isyntax_load_tile(isyntax_t* isyntax, isyntax_image_t* wsi, i32 scale, i32 
 		return;
 	}
 
+	// Measured on the real file: Y never became negative after the inverse transform (range 48..257), so this step has no
+	// effect on that slide. It is nonlinear (it has no wavelet-domain equivalent) and is applied only to the output
+	// tile, not to the LL blocks donated to child tiles.
 	// For the Y (luminance) color channel, we actually need the absolute value of the Y-channel wavelet coefficient.
 	// (This doesn't hold for Co and Cg, those are are used directly as signed integers)
     signed_magnitude_to_absolute_value_16_block(Y, idwt_width * idwt_height);
@@ -2432,6 +2532,13 @@ void isyntax_load_tile(isyntax_t* isyntax, isyntax_image_t* wsi, i32 scale, i32 
 }
 
 
+// Verified on the real v1 file (every block is preceded by its own 8-byte item header and the codeblock section is one
+// contiguous run): the file consists of 525 chunks of 63 codeblocks (scales 0, 1, 2) followed by 12 chunks of 66
+// (scales 3, 4, 5 plus the top-level LL), equal to the 537 clusters of the v2 header of the same scan.
+// Order inside a chunk: colour-major (Y, Co, Cg); per colour the coarsest scale first (1 block), then its 4 children
+// (x fastest), then the 16 grandchildren (x fastest), then the LL block when the chunk has one. Block index inside a
+// colour: 0 for the top scale, 1 + (y % 2) * 2 + (x % 2) for the next, 5 + (y % 4) * 4 + (x % 4) for the finest.
+// The example below comes from a different file (offsets in the 850 million range).
 // Example codeblock order for a 'chunk' in the file:
 // x        y       color   scale   coeff   offset      size    header_template_id
 // 66302	66302	0	    8	    1	    850048253	8270	18
@@ -2460,6 +2567,9 @@ void isyntax_load_tile(isyntax_t* isyntax, isyntax_image_t* wsi, i32 scale, i32 
 // The above pattern repeats for the other 2 color channels (1 and 2).
 // The LL codeblock is only present at the highest scales.
 
+// Decodes one codeblock that is already in memory as part of a chunk (the chunk's bytes start at chunk_base_offset in the
+// file). The payload excludes the 8-byte DICOM item header. Callers add at least 7 bytes of readable padding after the
+// data, because the bitstream reader loads 8 bytes at a time.
 void isyntax_decompress_codeblock_in_chunk(isyntax_codeblock_t* codeblock, i32 block_width, i32 block_height, u8* chunk, u64 chunk_base_offset, i32 compressor_version, i16* out_buffer) {
 	i64 offset_in_chunk = codeblock->block_data_offset - chunk_base_offset;
 	ASSERT(offset_in_chunk >= 0);
@@ -2469,6 +2579,8 @@ void isyntax_decompress_codeblock_in_chunk(isyntax_codeblock_t* codeblock, i32 b
 
 // Read between 57 and 64 bits (7 bytes + 1-8 bits) from a bitstream (least significant bit first).
 // Requires that at least 7 safety bytes are present at the end of the stream (don't trigger a segmentation fault)!
+// Bit stream convention: bit i of the stream is bit (i % 8) of byte (i / 8), so the stream is read like one giant
+// little-endian integer; a Huffman code's first bit is its least significant bit.
 static inline u64 bitstream_lsb_read(u8* buffer, u32 pos) {
 	u64 raw = read_u64_le(buffer + pos / 8);
 	raw >>= pos % 8;
@@ -2548,6 +2660,76 @@ void isyntax_test_decompress_block(const char* filename) {
 }
  */
 
+// =====================================================================================================
+// HULSKEN DECODER, full description. The encoder is Philips' hulskencompress.m (bitserialize4x2 ->
+// determinecompressionparameters -> encodeserializedcoefficients -> serializecompressionparameters).
+// Everything is little-endian and bit streams are read LSB first.
+//
+// WHAT IS CODED
+//   A codeblock is 1 (LL) or 3 (HL, LH, HH, in that order) arrays of 128 x 128 signed coefficients, 16 bit positions
+//   each: bit position 0 = sign plane, then 15 magnitude planes. The coefficients were already quantized and
+//   dead-zoned by the encoder (see the notes in isyntax.h): the lowest `quantizer` magnitude planes are all zero, and the
+//   encoder simply does not store a bitplane that is entirely zero.
+//
+// STAGE 1, BITPLANES (bitserialize4x2.m)
+//   - Each stored plane is 128 * 128 / 8 = 2048 bytes, one bit per coefficient. One BYTE is a 4 x 2 area (4 wide, 2 tall)
+//     of the plane, LSB = first coefficient of the area, row-major inside the area. Areas are ordered
+//         byte 0 = x0..3, y0..1    byte 1 = x0..3, y2..3    byte 2 = x4..7, y0..1    byte 3 = x4..7, y2..3   ...
+//     i.e. two bytes form a 4 x 4 area, 4 x 4 areas run left to right then downward. Philips calls this "snake order"
+//     (the webinar: "each 4x2 area of 1-bit pixels is assigned a unique symbol in [0,255]"); no row is reversed.
+//   - bitmask: one 16-bit mask per coefficient array; bit i set = plane i is stored. Mask bit 0 is the sign plane.
+//   - Plane order differs by compressor version:
+//       v1: per coefficient array: sign, then magnitude bit 0 (LSB) .. bit 14 (MSB); array 1, then array 2, then 3.
+//           mask bit k (k >= 1) = magnitude bit k-1.
+//       v2: per bit position, all arrays together: sign (array 1,2,3), then magnitude bit 14 (MSB) .. bit 0.
+//           mask bit j (j >= 1) = magnitude bit 15-j.
+//   - v1 stores the masks only if some plane is empty: as 2 bytes per array appended AFTER the planes (the
+//     decompressed length is then planes * 2048 + 2 * arrays). If no plane is empty no masks are stored and all are 1.
+//     v2 stores the masks at the start of the block.
+//   - Result of the quantizer/deadzone on the stored planes (checked on every codeblock of the real file):
+//     v1 mask bits 1..Q are never set where the quantizer is Q, and no nonzero magnitude is below the deadzone.
+//
+// STAGE 2, ZERO RUNS + HUFFMAN (determinecompressionparameters.m, encodeserializedcoefficients.m)
+//   The bitplane bytes (symbols 0..255) are entropy coded:
+//   - The zero-run symbol is the LEAST FREQUENT NONZERO byte value of the block (in practice a small value such as 3, 1, 5).
+//   - Two or more consecutive zero bytes form a run, coded as [Huffman code of the zero-run symbol][counter].
+//     The counter is `zero_counter_bits` wide (chosen per block to minimise size; mostly 3-4 bits, 11-12 bits for very
+//     sparse blocks). A longer run uses several [symbol][counter] pairs, MOST SIGNIFICANT counter block first, which is
+//     why only the first block can be zero.
+//   - Counter value 0 means "this is not a run": it is a literal occurrence of the zero-run symbol (escape).
+//     If a run is directly followed by the zero-run symbol, the encoder shortens the run by one and codes that last zero
+//     as an ordinary symbol, so the decoder never has to guess.
+//   - v1 stores the run length, v2 stores run length - 1 (and v2 only uses a run when it is shorter than repeating the
+//     zero symbol: minimum run length). A single zero byte is always an ordinary Huffman symbol.
+//   - Huffman tree, serialized pre-order: bit 0 = internal node (left subtree, then right subtree), bit 1 = leaf followed by
+//     the 8-bit symbol. Code bits: left branch = 0, right branch = 1, and the FIRST branch from the root is the LEAST
+//     significant bit of the code, which is also the first bit read from the stream. A tree with a single leaf has a
+//     one-bit code (here: code_size 0 is treated as 1). Trees have 2..256 leaves (median 19) and codes of at most 15 bits
+//     in the real file (the fast table below assumes at most 16).
+//
+// BLOCK HEADER (bit-packed, NOT byte-aligned after the first fields)
+//   v1: u32 serialized length (bytes after stage 2) | u8 zero-run symbol | u8 zero_counter_bits | Huffman tree | data
+//   v2: one u16 mask per array (1 or 3) | u8 zero-run symbol | u8 zero_counter_bits | bitplane seektable | Huffman tree | data
+//       serialized length = popcount(masks) * 2048.
+//   The v2 seektable has (number of distinct bit positions that are stored) - 1 entries of floor(log2(serialized length)) + 5 bits:
+//   the offset, in encoded bits from the start of the table, of the 2nd, 3rd ... group of planes. This decoder never uses
+//   it. Do not rely on it for parallel plane decoding: the encoder does not split a zero run at a plane boundary, so a
+//   recorded offset can lie after the true start of the plane.
+//   The stream is padded to a whole number of bytes.
+//
+// EMPTY BLOCKS
+//   A block of 8 bytes or less has no coefficients (all zero): tiles outside the scanned tissue, and, in tissue, any block
+//   whose coefficients were all removed by the deadzone (on the real file 81.7% of Co and 92.6% of Cg blocks at scale 0).
+//   Philips' own MATLAB reference decoder cannot read these 8-byte blocks and substitutes zeros.
+//
+// SIZE FACTS (real file, 17626 non-empty blocks): 1730 MB of 16-bit coefficients compress to 84.1 MB (20.6 : 1); dropping
+//   empty planes alone gives 339 MB, so the zero-run + Huffman stage contributes 4.0 : 1 (about 100 : 1 for the sparsest
+//   chroma blocks). The largest single item is Y at scale 1 (37% of the file): scale 0 Y is very sparse because of
+//   quantizer 1 / deadzone 2, scale 1 is not quantized.
+//
+// OUTPUT: coeff_count * block_width * block_height i16 in two's complement (after the sign-magnitude conversion), in the
+//   order HL, LH, HH (or just LL), rows in raster order.
+// =====================================================================================================
 bool isyntax_hulsken_decompress(u8* compressed, size_t compressed_size, i32 block_width, i32 block_height,
 								i32 coefficient, i32 compressor_version, i16* out_buffer) {
 	ASSERT(compressor_version == 1 || compressor_version == 2);
@@ -2625,6 +2807,8 @@ bool isyntax_hulsken_decompress(u8* compressed, size_t compressed_size, i32 bloc
 	u8 zero_counter_size = *(u8*)byte_pos++;
 	bits_read += 8;
 
+	// The offsets read below (v2 only) are parsed but never used by this decoder: the coefficient bytes are decoded
+	// sequentially from the start. See the note about the bitplane seektable in the big comment above this function.
 	u32 bitplane_offsets[16] = {0};
 	if (compressor_version >= 2) {
 		// Read bitplane seektable: a pointer is stored for a bit if it's represented in at least one of the bitmasks
@@ -3011,6 +3195,9 @@ bool isyntax_hulsken_decompress(u8* compressed, size_t compressed_size, i32 bloc
 		}
 	}
 
+	// Precisely: the unpacked planes are in "4x2 cell" order (each byte = a 4 x 2 area, two consecutive bytes = a 4 x 4 area,
+	// 4 x 4 areas left to right then downward). The loop below copies every group of 16 consecutive values into a 4 x 4 block of
+	// the raster output, one 4-value row (a u64) at a time; no row is reversed.
 	// Reshuffle 4x2 snake-order and convert signed magnitude to twos complement
 	for (i32 coeff_index = 0; coeff_index < coeff_count; ++coeff_index) {
 		u16 bitmask = bitmasks[coeff_index];
@@ -3044,6 +3231,11 @@ bool isyntax_hulsken_decompress(u8* compressed, size_t compressed_size, i32 bloc
 	return true;
 }
 
+// First valid H (high-pass) coefficient position at scale s, in level-0 pixel units of the zero-padded image:
+// (3 << s) - 2 = 1, 4, 10, 22, 46, 94, ... For LL add (1 << s). These are also the start values of the block coordinates
+// in the headers (block x/y = image origin + this + k * (256 << s)). Derived from Philips' validwaveletcoefficientposition.m
+// (level 1: first valid L at 2, H at 1; level n: H = 3*2^(n-1) - 2, L = 2^(n+1) - 2 with n = s + 1) and identical to the
+// start values in Philips' generate_struct.m and Python block-id code.
 static inline i32 get_first_valid_coef_pixel(i32 scale) {
 	i32 result = (PER_LEVEL_PADDING << scale) - (PER_LEVEL_PADDING - 1);
 	return result;
@@ -3054,6 +3246,9 @@ static inline i32 get_first_valid_ll_pixel(i32 scale) {
 	return result;
 }
 
+// Codeblocks per colour in a chunk whose top scale is `level`: a chunk holds up to 3 scales, 1 block at the top scale, 4 at
+// the next, 16 at the finest (1, 1 + 4, 1 + 4 + 16 depending on level % 3), plus one LL block if it contains the top level.
+// Matches the observed chunk sizes: 63 = 3 * 21, 66 = 3 * 22, 18 = 3 * 6 (a top chunk of two scales plus LL).
 i32 isyntax_get_chunk_codeblocks_per_color_for_level(i32 level, bool has_ll) {
 	i32 rel_level = level % 3;
 	i32 codeblock_count;
@@ -3107,6 +3302,9 @@ void isyntax_set_thread_pool(isyntax_t* isyntax, thread_pool_t* thread_pool) {
 }
 
 
+// Opens a v1 or v2 file. Both have been exercised: v1 with example_isyntax_files/1.isyntax (interface 5.0), v2 only as XML
+// headers (the sample FICs, interface 100.4). The v1 path is the one Philips' Python (extract_block_header.py) implements;
+// the v2 cluster table is only documented by this code.
 bool isyntax_open(isyntax_t* isyntax, const char* filename, enum libisyntax_open_flags_t flags) {
 
 	console_print_verbose("Attempting to open iSyntax: %s\n", filename);
@@ -3146,6 +3344,13 @@ bool isyntax_open(isyntax_t* isyntax, const char* filename, enum libisyntax_open
 			isyntax->filesize = filesize;
 
 			// https://www.openpathology.philips.com/wp-content/uploads/isyntax/4522%20207%2043941_2020_04_24%20Pathology%20iSyntax%20image%20format.pdf
+			// Measured layout of the real v1 file (offsets in bytes):
+			//   0              XML header (2,422,997 bytes), then the 3-byte EOT 0D 0A 04 -> data starts at 2,423,000
+			//   2,423,000      seektable: tag 301D,2015, u32 size, 40-byte entries (49,176 entries; more than the 33,867 stored blocks,
+			//                  because the index covers the whole grid and absent blocks have offset 0)
+			//   after it       FFFE,E0DD 00000000 (sequence delimiter) and an empty FFFE,E000 item, 16 bytes in total
+			//   then           codeblocks: [FFFE,E000 + u32 size = 8 bytes][payload], contiguous to the end of the file
+			// The optional 7FE0,0010 pixel-data tag mentioned in the spec is not present in this file.
 			// Layout of an iSyntax file:
 			// XML Header | End of Table (EOT) marker, 3 bytes "\r\n\x04" | Seektable (optional) | Codeblocks
 
@@ -3257,6 +3462,9 @@ bool isyntax_open(isyntax_t* isyntax, const char* filename, enum libisyntax_open
 
 				i32 num_levels = wsi_image->level_count;
 				ASSERT(num_levels >= 1);
+				// Number of scale-0 tiles across the grid: ceil(padded width / (block << L)) << (L - 1). Rounding up to a multiple of
+				// 2^(L-1) tiles makes every scale up to L-1 an integer grid (grid >> s). For the real file: 128 x 96 tiles at scale 0
+				// although only about 100 x 84 hold image data; the rest are never stored.
 				i32 grid_width = ((wsi_image->width_including_padding + (block_width << num_levels) - 1) / (block_width << num_levels)) << (num_levels - 1);
 				i32 grid_height = ((wsi_image->height_including_padding + (block_height << num_levels) - 1) / (block_height << num_levels)) << (num_levels - 1);
 
@@ -3305,6 +3513,12 @@ bool isyntax_open(isyntax_t* isyntax, const char* filename, enum libisyntax_open
 					codeblock->x_adjusted = (i32)codeblock->x_coordinate - wsi_image->offset_x;
 					codeblock->y_adjusted = (i32)codeblock->y_coordinate - wsi_image->offset_y;
 
+					// Seektable index, per colour: all H tiles of scale 0 (raster order), then scale 1, ... scale L-1, then the LL tiles of the
+					// top scale; the colours follow one after the other (tiles_per_color = H tiles of all scales + LL tiles). At scale s the
+					// grid is (grid_width >> s) x (grid_height >> s). For a block at absolute (x, y): subtract the image origin and the
+					// first-valid-pixel offset of its scale, divide by the tile pitch (256 << scale). This is an exact port of Philips'
+					// calculate_block_id (extract_block_header.py); on the real file all 33,867 lookups land on distinct entries whose
+					// sizes sum to the codeblock area (84,267,078 bytes), and the offsets equal those of the v2 table of the same scan.
 					// Calculate the block ID (= index into the seektable)
 					// adapted from extract_block_header.py
 					bool is_ll = codeblock->coefficient == 0;

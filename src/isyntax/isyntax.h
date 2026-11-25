@@ -25,6 +25,71 @@
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// =====================================================================================================
+// ORIENTATION NOTES (added to this fork during a bit-level study of the format; COMMENTS ONLY, no code
+// was changed). Companion documents in the repository root: CLAUDE.md, Example_iSyntax_File_Claude.md,
+// Example_FIC_Files_Claude.md, Philips_Compression_Code_Samples_Claude.md, Image_Format_Code_Samples_Claude.md,
+// Viewing_Code_Samples_Claude.md, Third_Party_Documentation.md. Statements marked [real file] were measured on
+// example_isyntax_files/1.isyntax (data model v1, 25600 x 21504 padded, 6 levels, 33867 codeblocks).
+//
+// FILE LAYOUT
+//   XML header | EOT 0D 0A 04 | seektable (v1 only) | FFFE,E0DD delimiter + empty FFFE,E000 item | codeblocks
+//   - Every codeblock is [FFFE,E000 + u32 size = 8-byte DICOM item header][payload], back to back, so the
+//     codeblock section is one contiguous run that ends exactly at end-of-file [real file]. Offsets and sizes
+//     in the tables always refer to the payload, not to the 8-byte item header.
+//   - Data model v1 (UFS interface version < 100, e.g. 5.0): the XML holds UFS_IMAGE_BLOCK_HEADER_TABLE
+//     (0x301D,0x2014; base64; coordinates, template id and, in the "full" form, offset and size) and the file
+//     holds a seektable (tag 0x301D,0x2015; 40-byte entries) with the offset and size of every codeblock,
+//     indexed by a "block id" computed from the block coordinates (see isyntax_open()).
+//   - Data model v2 (>= 100, e.g. 100.4): no seektable. The XML holds UFS_IMAGE_CLUSTER_HEADER_TEMPLATES
+//     (0x2016) and UFS_IMAGE_CLUSTER_HEADER_TABLE (0x301D,0x201F; base64) which lists, per cluster ("chunk"),
+//     its coordinates, template id, data offset and size, and the relative offset and size of each codeblock.
+//   - The v1 seektable and the v2 cluster table describe identical data: for the same scan, all 33867
+//     (colour, scale, coefficient, offset, size) tuples are equal [real file vs 1.fic].
+//   - Philips' own Python/MATLAB samples understand only v1; v2 is documented only by this code.
+//
+// GEOMETRY (all derived from the 5/3 filter support; verified against Philips' MATLAB and on the real file)
+//   - scale s = 0 is full resolution. A codeblock holds 128 x 128 coefficients, so it covers a tile of
+//     256 * 2^s pixels per side after the inverse transform. Block coordinates are in level-0 pixels.
+//   - Padded image coordinates: the image is zero-padded by 3 * (2^L - 1) = (3 << L) - 3 pixels on every side
+//     (L = number of levels), and further on the right/bottom so the grid is a multiple of the block size.
+//   - First valid coefficient position at scale s: H = (3 << s) - 2 (1, 4, 10, 22, 46, 94, ...), LL = H + (1 << s).
+//     At scale s, H coefficient n sits at position H + 2^(s+1) * n and LL coefficient n at LL + 2^(s+1) * n.
+//     Hence at every level the stream starts with an H sample and the low band lies on odd positions of the
+//     interleaved output ("cas = 1" in isyntax_dwt.c).
+//   - Valid size = padded size - 2 * padding. The valid-data envelope vertices in the XML start at the padding
+//     (189 for 6 levels, 765 for 8, 1533 for 9).
+//
+// WAVELET: integer reversible 5/3 (LeGall, "rbio2.2" integer-to-integer in Philips' MATLAB), identical in its
+//   integer rounding to the JPEG 2000 reversible 5/3 (see isyntax_dwt.c). Philips' encoder does not use
+//   symmetric extension at image edges: it zero-pads and keeps only "valid" coefficients, which is why
+//   neighbouring tiles must overlap by a few coefficients.
+//
+// QUANTIZATION AND DEADZONE: ENCODER-ONLY (the decoder never needs them, see the stubs in isyntax.c)
+//   The XML carries DP_WAVELET_QUANTIZER (0x101B) and DP_WAVELET_DEADZONE (0x101C) per colour group and per
+//   level. They describe what the scanner's encoder did to the wavelet coefficients BEFORE Hulsken coding:
+//       for each HL, LH, HH coefficient c of a quantized level (LL is never touched):
+//           if abs(c) <= deadzone:  c = 0                                     (deadzone first)
+//           c = fix(c / 2^quantizer) * 2^quantizer                            (then truncate toward zero)
+//   Nothing is divided out: values keep their original scale, they merely have their lowest `quantizer`
+//   magnitude bits cleared. That is why decoding needs no dequantization. In the bitplane domain (see
+//   isyntax_hulsken_decompress) the effect is: the lowest `quantizer` magnitude planes are always empty and are
+//   simply not stored (their bit in the per-coefficient bitmask is 0), and no nonzero value is smaller than the
+//   deadzone (after truncation the smallest survivor is exactly the deadzone value, e.g. 17 -> 16).
+//   Parameter mapping: PerColor entry 1 = Y, entry 2 = Co and Cg; PerLevel entries are level 0 first, where
+//   level 0 = the first (finest) DWT level = scale 0 in this code; levels beyond the table are unquantized.
+//   Philips "Quality=2" ("Q2") table, as found in every sample header:
+//                        scale 0 (Quantizer, Deadzone)   scale 1    scale 2 and up
+//         Y                       (1, 2)                  (0, 0)     unquantized
+//         Co, Cg                  (4, 16)                 (2, 8)     unquantized
+//   [real file] Checked on all 17626 non-empty codeblocks: in compressor-v1 mask numbering (bit 0 = sign,
+//   bit k = magnitude bit k-1) no block ever sets mask bit 1 for Y scale 0, bits 1-4 for chroma scale 0, or
+//   bits 1-2 for chroma scale 1; the smallest nonzero |c| in sampled blocks is 2, 16 and 8 respectively. The spec's
+//   wording for the deadzone ("greater or equal") is wrong: the encoder zeroes values less than or equal to it.
+//
+// COLOUR: lossy iSyntax stores YCoCg-R (Y, Co, Cg). See ycocg_to_rgb() in isyntax.c for the two rounding
+//   conventions that exist (they change 64.5% of the pixels of the real file by up to 2 levels).
+// =====================================================================================================
 #pragma once
 
 #ifdef __cplusplus
@@ -40,6 +105,10 @@ extern "C" {
 
 #include "yxml.h"
 
+// Coefficients are held in 16 bits. The stored Hulsken data has 16 bit planes per coefficient (sign + 15
+// magnitude bits), but in practice values are small: the largest magnitude seen in any intermediate array of an
+// independent full reconstruction of the real file was 282 (9 bits), so neither the 16-bit storage nor the
+// 16-bit SIMD lifting (which wraps instead of widening) overflows for ordinary 8-bit slides.
 #define DWT_COEFF_BITS 16
 #if (DWT_COEFF_BITS==16)
 typedef i16 icoeff_t;
@@ -47,6 +116,12 @@ typedef i16 icoeff_t;
 typedef i32 icoeff_t;
 #endif
 
+// Overlap needed for one tile's inverse transform: each of the four subband quadrants (LL, HL, LH, HH) of a
+// tile is extended by 4 coefficients on each side with data from the neighbouring tiles of the same scale
+// (PAD_L on the left/top, PAD_R on the right/bottom). The 5/3 synthesis needs at most 2 neighbouring
+// coefficients per level, so 4 leaves a safety margin. ISYNTAX_IDWT_FIRST_VALID_PIXEL is the index, in the
+// (2 * (128 + 8))-wide inverse-transform buffer, of the first output pixel that is not contaminated by the
+// buffer edges. Numerically it equals 2 * PAD_L - 1 = 7; the margin itself comes from the reach of the 5/3 synthesis filters.
 #define ISYNTAX_IDWT_PAD_L 4
 #define ISYNTAX_IDWT_PAD_R 4
 #define ISYNTAX_IDWT_FIRST_VALID_PIXEL 7
@@ -77,6 +152,14 @@ enum isyntax_node_type_enum {
 };
 
 // NOTE: Most of these have DICOM group 0x301D. Currently there seem to be no element ID collisions.
+// The wavelet quantizer elements (0x1019 .. 0x101C) are parsed as empty stubs in isyntax.c because the
+// decoder does not need them: quantization and deadzone are applied only by the encoder (see the notes at the
+// top of this file). Nesting in the XML (inside the WSI DPScannedImage, after DP_COLOR_MANAGEMENT):
+//   DP_WAVELET_QUANTIZER_SETTINGS_PER_COLOR (0x1019)  -> array of 2 DPWaveletQuantizerSettingsPerColor
+//      [0] = luma (Y), [1] = the other colour components (Co and Cg)
+//     DP_WAVELET_QUANTIZER_SETTINGS_PER_LEVEL (0x101A) -> array, level 0 (= scale 0, finest) first
+//       DP_WAVELET_QUANTIZER (0x101B): coefficients are truncated to a multiple of 2^value
+//       DP_WAVELET_DEADZONE  (0x101C): coefficients with abs(c) <= value are set to 0
 enum isyntax_group_data_object_dicom_element_enum {
 	// Group 0x301D
 	PIM_DP_SCANNED_IMAGES                   = 0x1003, // DPScannedImage
@@ -170,12 +253,14 @@ typedef struct isyntax_image_dimension_range_t {
 	i32 numsteps;
 } isyntax_image_dimension_range_t;
 
+// One template per (colour, scale, band group). Observed in v2 headers: 3 * (L + 1) templates (21 for 6
+// levels, 27 for 8, 30 for 9): H group for every scale plus one LL template per colour at the top scale.
 typedef struct isyntax_block_header_template_t {
 	u32 block_width;     // e.g. 128
 	u32 block_height;    // e.g. 128
 	u8 color_component;  // 0=Y 1=Co 2=Cg
 	u8 scale;            // range 0-8
-	u8 waveletcoeff;     // either 1 for LL, or 3 for LH+HL+HH
+	u8 waveletcoeff;     // 1 = the HL+LH+HH group (a codeblock with coefficient == 1), 3 = LL (coefficient == 0); set from the dimension range start (0 -> 1, otherwise 3). NOTE: this comment used to say the opposite
 } isyntax_block_header_template_t;
 
 typedef struct isyntax_cluster_block_header_t {
@@ -196,6 +281,9 @@ typedef struct isyntax_cluster_relative_coords_t {
 	u32 waveletcoeff;
 } isyntax_cluster_relative_coords_t;
 
+// Observed cluster sizes (blocks per cluster, all colours): 63 = 3 colours * (16 + 4 + 1) for three scales
+// without LL, 66 for a cluster that also holds the top-level LL (3 * 22), and 18 for a top cluster of only two
+// scales plus LL (3 * (4 + 1 + 1)). 70 is therefore a comfortable upper bound for the files seen so far.
 #define MAX_CODEBLOCKS_PER_CLUSTER 70 // NOTE: what is the actual maximum possible?
 
 typedef struct isyntax_cluster_header_template_t {
@@ -215,6 +303,17 @@ typedef struct isyntax_valid_data_envelope_t {
 	i32 vertex_count;
 } isyntax_valid_data_envelope_t;
 
+// One compressed block of coefficients: one colour x one scale x one tile position.
+//   coefficient == 1: the three high-pass subbands HL, LH, HH of that tile merged into one block (3 * 128 * 128
+//                     values, decoded in that order); coefficient == 0: the LL subband (1 * 128 * 128 values),
+//                     which is stored only at the top scale. (The v2 header says "waveletcoeff 3 = LL" and
+//                     the code above maps it to coefficient 0.)
+//   block_data_offset / block_size: payload position in the file (the 8-byte DICOM item header precedes it).
+//                     A size of 8 bytes or less is an "empty" block (all coefficients zero). In real files these
+//                     are tiles outside the tissue AND tiles zeroed by the encoder's deadzone: on the real file 81.7%
+//                     of Co and 92.6% of Cg blocks at scale 0 are empty.
+//   x_coordinate / y_coordinate: absolute position in level-0 pixels of the block's first valid coefficient,
+//                     i.e. image origin + (3 << scale) - 2 for H (plus (1 << scale) for LL) + k * (256 << scale).
 typedef struct isyntax_codeblock_t {
 	u32 x_coordinate;
 	u32 y_coordinate;
@@ -231,6 +330,12 @@ typedef struct isyntax_codeblock_t {
 	u64 block_id;
 } isyntax_codeblock_t;
 
+// A chunk (called a cluster in the v2 header) is a group of codeblocks stored contiguously in the file:
+// three consecutive scales for all three colours. Order inside a chunk [real file]: colour-major (Y, Co, Cg);
+// within a colour the coarsest scale's block first, then its 2 x 2 children (x fastest), then the 4 x 4
+// grandchildren (x fastest); the top-level LL block, when present, comes last for that colour. That is
+// 1 + 4 + 16 = 21 blocks per colour (63 per chunk), or 22 per colour (66) when LL is included.
+// The real file has 525 chunks of 63 blocks (scales 0..2) followed by 12 chunks of 66 (scales 3..5 + LL).
 typedef struct isyntax_data_chunk_t {
 	i64 offset;
 	u32 size;
@@ -296,6 +401,11 @@ typedef struct isyntax_level_t {
 	bool is_fully_loaded;
 } isyntax_level_t;
 
+// width_including_padding / height_including_padding are the padded image size from the XML dimension ranges;
+// width / height remove the 2 * level0_padding border, where level0_padding = (3 << level_count) - 3.
+// codeblocks / data_chunks come from the v1 block header table + seektable, or from the v2 cluster table.
+// compressor_version: 1 for UFS_IMAGE_BLOCK_COMPRESSION_METHOD 16, 2 for method 19. All six sample headers and
+// the real file use method 16. The container data model (v1/v2) and the compressor version are independent.
 typedef struct isyntax_image_t {
 	u32 image_type;
     i64 base64_encoded_jpg_file_offset;
@@ -369,6 +479,9 @@ typedef struct isyntax_xml_parser_t {
 	bool initialized;
 } isyntax_xml_parser_t;
 
+// data_model_major_version: < 100 (usually 5) = v1 layout, >= 100 (e.g. 100.4) = v2 layout (see the notes at the top).
+// dicom_derivation_description carries e.g. "PHILIPS UFS V1.8.6614 | Quality=2 | DWT=1 | Compressor=16":
+// Quality=2 selects Philips' "Q2" quantizer/deadzone table, DWT=1 the 5/3 wavelet, Compressor=16 the Hulsken v1 coder.
 typedef struct isyntax_t {
 	enum libisyntax_open_flags_t open_flags;
 	i64 filesize;
@@ -424,6 +537,9 @@ typedef struct isyntax_t {
 } isyntax_t;
 
 // function prototypes
+// Decodes one codeblock (compressed payload) into coeff_count * block_width * block_height i16 values in
+// two's complement, where coeff_count is 3 for coefficient == 1 (order HL, LH, HH) and 1 for LL.
+// See the long description at the definition in isyntax.c.
 bool isyntax_hulsken_decompress(u8 *compressed, size_t compressed_size, i32 block_width, i32 block_height, i32 coefficient, i32 compressor_version, i16* out_buffer);
 void isyntax_set_thread_pool(isyntax_t* isyntax, thread_pool_t* thread_pool);
 bool isyntax_open(isyntax_t* isyntax, const char* filename, enum libisyntax_open_flags_t flags);

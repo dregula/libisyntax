@@ -26,6 +26,18 @@
 */
 
 #include "common.h"
+// Overview (comments added for this fork). Cache-backed tile reader behind the public libisyntax_tile_read():
+//   1. For a requested (scale, tile_x, tile_y) work out which tiles are needed: the tile and its ancestors (parents first,
+//      because a tile's LL band is the inverse-transform output of its parent; only the top scale's LL is stored in the
+//      file), plus the 3 x 3 neighbours of each of them, which must have their H (and LL) coefficients loaded to supply
+//      the 4-coefficient margins.
+//   2. Read and Hulsken-decode the missing codeblocks (H and LL for the three colour channels) into per-tile buffers.
+//      The decode path performs no dequantization: quantizer and deadzone were applied by the encoder only.
+//   3. Run the per-tile inverse transforms top-down (isyntax_idwt_tile_for_color_channel), which donates LL blocks to the four
+//      children, then convert the requested tile from YCoCg-R to RGB.
+//   4. Keep recently used tiles in an LRU list and trim it (counted in tiles, not bytes).
+// The Y/Co/Cg to RGB rounding depends on how the library was built (SIMD floor vs scalar truncation); see ycocg_to_rgb()
+// in isyntax.c.
 #include "isyntax_reader.h"
 
 #define LOG(msg, ...) console_print(msg, ##__VA_ARGS__)

@@ -1,7 +1,9 @@
 cmake-build*/
 .idea/
+.claude/
 release/
 build/
+reconfigure/
 *.exe
 *.dll
 *.app/*
@@ -10,3 +12,4 @@ build/
 *.isyntax
 *.json
 *.xml
+

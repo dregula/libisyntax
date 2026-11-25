@@ -30,6 +30,11 @@
 #include "intrinsics.h"
 
 #define ISYNTAX_STREAMER_IMPL
+// Overview (comments added for this fork). This file is the older threaded SlideScape streamer and is NOT part of the Meson
+// or CMake library build; it documents how the viewer scheduled work: data is loaded per chunk (a chunk holds up to three
+// scales: 1 + 4 + 16 codeblocks per colour, plus LL at the top), H coefficients are decompressed on worker threads, and a
+// tile can be inverse-transformed only when it and its 3 x 3 neighbours have coefficients. Decoding itself is the same as
+// in isyntax.c (isyntax_hulsken_decompress, isyntax_idwt_tile_for_color_channel); no dequantization is involved.
 #include "isyntax_streamer.h"
 
 static bool allow_load_tile_on_worker_threads = true; // disable to load tiles only on the main thread (e.g. for debugging)
