@@ -3,7 +3,7 @@
 Date: 2026-11-25. Status: exploration; the halo algorithm is verified on `1.isyntax`, everything marked "open" is not.
 Tags: **[verified]** = measured in this repo on the real file or by exhaustive/numerical test; **[derived]** = follows from the
 geometry in `tools/v1_analysis/reconstruct_np.py` and was then checked; **[hypothesis]**; **[spec]** = from the Philips PDFs.
-Companion notes: [Third_Party_Documentation.md](Third_Party_Documentation.md), [Example_iSyntax_File_Claude.md](Example_iSyntax_File_Claude.md).
+Companion notes: [Color_Conversion_Claude.md](Color_Conversion_Claude.md) (colour conversion, split out 2026-11-26), [Third_Party_Documentation.md](Third_Party_Documentation.md), [Example_iSyntax_File_Claude.md](Example_iSyntax_File_Claude.md).
 
 ## 1. Target (as given by the project owner)
 
@@ -59,12 +59,9 @@ Strip work is 14 to 39 % of a full forward transform (9 % for 512 px at h = 2). 
 
 `count_chunks.py` (all neighbours whole, full LL chain) gave 8 to 37 chunks and a median of about 300 codeblocks (3.2 MB) for one scale-0 tile. That was an upper bound; for a 256-px frame at layer 0 the windowed decoder reads 66 codeblocks (22 per colour, about a fifth) and about a third of the bytes. One frame per layer only; a systematic count is open.
 
-## 6. Colour space (YCoCg-R to YBR_RCT) **[measured, see 8d]**
+## 6. Colour space (YCoCg-R to YBR_RCT) **[moved]**
 
-- Algebra: Y' = Y, Cb = -Co/2 - Cg, Cr = Co/2 - Cg (determinant 1). **[verified numerically]** (`rct_ycocg_vs_rct.py`, subsampled RGB cube).
-- If the encoder's forward used floor (`>>1`): the direct conversion with `>>1` is bit-exact (Y', Cb, Cr). If it used `fix` (truncation, the Philips compression samples): Cb and Cr are exact with truncating halves, but Y' = Y is wrong by -1 in 37.5 % of colours of the RGB cube (63-65 % of the pixels of real tissue frames). Mismatched conventions give Cb/Cr off by 1 in 25 %.
-- **The scanner's forward convention is unknown.** The lossless top-level LL band cannot reveal it (`ll_probe.py`, inconclusive): the lifting is a bijection on integer triples either way. A Philips-made RGB export of the same scan would settle it. **open**
-- **Correction of an earlier expectation:** a per-coefficient (wavelet-domain) conversion is **not** "off by about 1". It has a systematic bias that grows with the number of decomposition levels (section 8d).
+Moved to [Color_Conversion_Claude.md](Color_Conversion_Claude.md), section C1. Summary: the YCoCg-R to YBR_RCT algebra (Y' = Y, Cb = -Co/2 - Cg, Cr = Co/2 - Cg); the halving convention is truncation (inferred from the Philips SDK output, C1); a wavelet-domain conversion is biased, not "off by 1". RGB as target: section C3 there.
 
 ## 7. What the Philips documents say about chunks
 
@@ -74,7 +71,7 @@ Strip work is 14 to 39 % of a full forward transform (9 % for 512 px at h = 2). 
 
 ## 8. Not done
 
-- A decision on colour fidelity (section 8d), now with real sizes in 8g.
+- A decision on colour fidelity (Color_Conversion_Claude.md section C2), now with real sizes in 8g.
 - Sparse-frame rules beyond the blank-candidate test (section 8a), and what a frame whose neighbour is omitted should assume (the decoder uses black H blocks and a dummy LL for missing neighbours). Edge tiles and the matrix-corner tiles are covered in 8a.
 - A real JPEG 2000 codestream (Tier-1/Tier-2 coding, guard bits, OpenJPEG decode; also T.800 itself, to confirm the grid, extension and order conventions) and the 8-bit range question (Y reaches 257 in the pixel domain, 266 in the top LL).
 - Systematic footprint and timing over many frames; the minimal depth h = 2 is observed, not proven.
@@ -106,7 +103,7 @@ Settled:
 - **Pixel Spacing is centre to centre** (mm), which matches our sample spacing 0.25 um x 2^k = 0.00025 x 2^k mm. Imaged Volume Width/Height (mm) are required for VOLUME images (for this file 25222 x 0.25 um = 6.3055 mm by 5.2815 mm).
 - **Total Pixel Matrix Origin Sequence** gives the location of the top-left pixel ("pixel 1\1") of the matrix; **Image Orientation (Slide)** (0048,0102, direction cosines of the first row and column, required with Plane Position (Slide)) relates the matrix to the slide axes. Total Pixel Matrix Columns/Rows describe the extent as if the volume were encoded non-sparse.
 - **Slide Coordinate System:** origin nominally at the slide's lower-left corner; X increases toward the right edge, Y toward the label edge (or top edge), Z in um from the glass surface; X, Y offsets in mm. Supplement 145 notes that this slide (X, Y) system is **rotated 180 degrees from the conventional image (row, column) orientation with the label on the left**, so Image Orientation (Slide) is generally not the identity.
-- **YBR_RCT (C.7.6.3.1.2):** Y = floor((R + 2G + B)/4), Cb = B - G, Cr = R - G; inverse G = Y - floor((Cr + Cb)/4), R = Cr + G, B = Cb + G. Encapsulated data only, Samples per Pixel 3, Planar Configuration 0, valid at any Bits Allocated; for JPEG 2000 the DC level shift is applied **before** the forward colour transform and the transformed components may be signed. This matches section 6 of this file (the level shift only changes Y).
+- **YBR_RCT (C.7.6.3.1.2):** Y = floor((R + 2G + B)/4), Cb = B - G, Cr = R - G; inverse G = Y - floor((Cr + Cb)/4), R = Cr + G, B = Cb + G. Encapsulated data only, Samples per Pixel 3, Planar Configuration 0, valid at any Bits Allocated; for JPEG 2000 the DC level shift is applied **before** the forward colour transform and the transformed components may be signed. This matches section C1 of Color_Conversion_Claude.md (the level shift only changes Y).
 
 **Not settled by the text I read (still open):**
 1. Whether the X/Y offsets (per frame and for the matrix origin) refer to the **centre or the corner** of the top-left pixel. Slide Coordinates Note 2 says there is no a priori correspondence between pixels and slide coordinates, and the Image Center Point text speaks of the centre of the image pixel plane. The harness reports both; choosing is a project decision.
@@ -126,20 +123,9 @@ Pages: 8.2.4 (JPEG 2000 transfer syntaxes), A.4 (encapsulation), A.4.4 (JPEG 200
 
 Consequences for this plan: every frame is a raw reversible-5/3 codestream with SGcod = 1 and photometric interpretation YBR_RCT, bits allocated and stored 8, and Pixel Representation 0. Our per-frame independence is exactly what PS3.5 requires. **What this does not verify** is the JPEG 2000 Part 1 convention I assumed (low-pass at even canvas coordinates, whole-sample symmetric extension at the frame edge, vertical-then-horizontal forward order): that lives in ITU-T T.800, which I have not read, and my tests use my own NumPy transforms. OpenJPEG's forward transform was later checked against these conventions (section 8g); supplying our own coefficients to a codec is not possible with standard encoders, so the sizes in 8g encode pixel images that carry the intended coefficients. **partly closed**
 
-## 8d. Colour conversion strategies, measured **[verified on `1.isyntax`; scripts `colour_ebcot_probe.py`, `colour_bias_by_levels.py`, `colour_sparsity_cost.py`, `colour_dc_fix.py`]**
+## 8d. Colour conversion strategies **[moved]**
 
-Data needed: Cb and Cr at a position need Co and Cg at that position (Y is not needed for chroma if the forward used floor). All three colours of a region sit in the same chunk (colour-major), so mustering the three channels costs no extra chunk reads, only the 3x memory already counted in section 5.
-
-**Wavelet-domain conversion** (`Cb = -q(Co) - Cg`, `Cr = Cb + Co`, `Y' = Y`, applied to LL and every detail band of the frame's own pyramid, then decoded):
-- Rounding in `q()` is not the problem: at the two finest levels Co is even almost everywhere (0.3 % and 1.1 % odd; the quantizer leaves multiples of 16 and 4), at coarser levels about 50 % are odd.
-- The problem is that the floors inside the reversible lifting do not commute with the colour combination: the decoded Cb differs from the pixel-domain Cb by a **bias that grows by about -0.6 per level for Cb and -0.4 for Cr**: mean error D=1: -0.62, D=2: -1.30, D=3: -2.55, D=4: -3.73, D=5: -4.88 (Cb, tissue, 256 px; Cr: -0.37 ... -3.01). A random-image control shows the same effect, so it is not a bug. At D = 5, Cb is exact in 0.1 % of pixels (max error 10), RGB differs in about 100 % of pixels (max 6-7). `q=floor` and `q=trunc` behave alike. The bias depends on content (frame of mostly flat padding: -1.0; tissue: -5.0; glass: -4.3).
-- A constant correction added to the LL band shifts the whole decoded plane exactly, so the mean bias can be removed, but only per tile (a global constant fits tissue but over-corrects the flat scan-edge frame by +3). After a global fix on 512-px frames: Cb error std 1.3, range about -7..+6, Cr std 1.2; 97-99 % of pixels have RGB within 2 levels on tissue and glass, 25 % on the scan-edge frame. Near-lossless at best.
-
-**Pixel-domain conversion** (decode Co and Cg pixels, form Cb and Cr exactly, run the frame's forward transform): exact relative to the chosen convention, and no halo problem for chroma at all, but it **destroys the sparsity** that iSyntax's quantizer and deadzone created. Cb detail coefficients, tissue frame 1024 px (non-zero fraction, zero-order entropy per coefficient): level 1: 0.12 % and 0.02 b (wavelet domain) versus **62.7 % and 1.44 b** (exact); level 2: 4.4 % and 0.42 b versus 65.5 % and 2.12 b; levels 3 to 5 about the same either way. Cr is similar (43 % and 1.27 b at level 1). Level 1 holds three quarters of all coefficients, so this is a large size increase in tissue; I did not extrapolate to the whole file (blank glass stays zero). If the forward convention was `fix`, Y' = Y + delta (delta in {-1, 0}, 63-65 % of tissue pixels) and Y would lose its sparsity in the same way.
-
-**Hybrid:** copy-and-patch Y (exact only if the forward used floor), recompute chroma in the pixel domain. Same chroma cost as above.
-
-Trade-off, not a free lunch: wavelet-domain = sparse and small but chroma off by a drifting few levels; pixel-domain = exact (against one chosen convention) but chroma fine bands become dense. **Decision needed from the project owner: the fidelity target for the DICOM file relative to the iSyntax decode.** **open**
+Moved to [Color_Conversion_Claude.md](Color_Conversion_Claude.md), section C2. Summary: wavelet-domain conversion is sparse but biased (Cb -4.9 at D = 5); pixel-domain conversion is exact but dense (Cb level-1 non-zero 0.12 % to 63 %); fidelity target is an open decision.
 
 ## 8e. Quantizer and deadzone versus EBCOT **[verified in the stored coefficients; real EBCOT sizes not measured]**
 
@@ -182,14 +168,14 @@ So: (1) r = 0 is legal; the standard does not fix the value. (2) With r = 0 and 
 | scanned glass (Y about 230, inside the envelope, not filler) | 0.453 MB | W-floor / E-floor / E-fix at 1024 | 0.88x / 3.12x / 4.02x | | | |
 
 - The wavelet-domain route costs about the same as iSyntax (0.87-0.99x); larger frames help (tissue: -4.5 % at 512, -6.3 % at 1024, -7.2 % at 2048 relative to 256). This matches the white paper's "about 10 % better than Hulsken" only roughly (0.88-0.93x at 1024 and up).
-- The exact pixel-domain route is **2.1 to 3.2 times larger** (floor), **2.6 to 4.0 times** (fix): the chroma sparsity loss of 8d, now measured with a real encoder.
+- The exact pixel-domain route is **2.1 to 3.2 times larger** (floor), **2.6 to 4.0 times** (fix): the chroma sparsity loss of C2 (Color_Conversion_Claude.md), now measured with a real encoder.
 - 32 x 32 code-blocks add 3 to 4 % over 64 x 64.
 - Clipping: an 8-bit codestream cannot hold pixels outside 0..255, so those were clipped (tissue: 1.4-2.5 k of 4.2 M pixels; blank glass: none). This is inherent to 8-bit DICOM and changes the image there.
 - The whole-slide file would be roughly 0.9-1.0x of 88.9 MB for the base layer in the wavelet-domain route (extrapolated from three regions). **A complete DICOM pyramid is far larger than the base layer alone:** each layer is its own image, and layer k carries the bits of iSyntax scales k and coarser, which hold most of the data (zero-order estimate from 8e: layers 0..5 hold about 1.21, 1.11, 0.62, 0.20, 0.05, 0.01 bits per padded pixel, about 2.6x the iSyntax size for all six layers; a coarser set of layers costs less). Rough, not encoded. **open**
 
 **Cost of the empty least-significant planes, measured** (planes removed by dividing the stored multiples by 2^Q, which leaves the earlier planes' coding unchanged; applied also to border code-blocks, so an upper bound for what plane deletion could save): tissue 0.79 % (1024 px) to 1.18 % (256 px) of the stream; blank glass 0.34-0.56 %; Y planes account for about two thirds. With r = 1/2 decoders (OpenJPEG) the planes must be coded anyway; even with an r = 0 decoder the gain would be under about 1 %. Not worth a non-standard decoder (section 8f).
 
-Net effect on the open decision (8d): the wavelet-domain conversion keeps the file at iSyntax size but biases chroma (near-lossless at best with a per-tile correction); exact pixel-domain conversion is exact against a chosen convention at 2 to 4 times the size.
+Net effect on the open decision (Color_Conversion_Claude.md C2): the wavelet-domain conversion keeps the file at iSyntax size but biases chroma (near-lossless at best with a per-tile correction); exact pixel-domain conversion is exact against a chosen convention at 2 to 4 times the size.
 
 ## 8h. Omitting tiles: size savings and review material **[verified: real OpenJPEG sizes of every tile; scripts `omission_size_estimate.py`, `omission_summary.py`, `omission_review_images.py`; files in `$SOURCEROOT/transcoding_review/`]**
 
@@ -202,10 +188,15 @@ Two strategies kept in play (definitions in `omission_summary.py`):
   - *Strict range* (max - min) <= S, i.e. no speck: S = 8: 9.5 %; S = 16: 13.1 %; S = 32: 21.6 %; S = 64: 34.6 % (512 px: 1.0 / 3.0 / 7.2 / 23.3 %; 1024 px: 0 / 0.2 / 1.0 / 8.7 %).
   - The difference is dust: tiles omitted by the robust rule have strict ranges up to 167 levels (median 8, 95th percentile 59) in layer 0, so the robust rule deletes isolated specks (visible as dots in `diff_R4_x16.png` and the crops).
   - Savings fall with frame size because large frames contain tissue: at T = 4, 23 % / 16 % / 11 % for 256 / 512 / 1024 px. Layer 0 and layer 1 carry most of the saving (T = 4, 256 px: 35 % and 25 % of those layers; layer 2: 0.1 %, T = 8: 30 %; layers 3 to 5: small).
+  - **Speck size (measured 2026-11-26, `speck_size_analysis.py`, `transcoding_review/speck_components_T4_F256.csv`).** Layer 0, 256-px frames, the 4387 non-filler tiles omitted at T = 4; pixel = 0.25 um. Specks = 8-connected pixels deviating from the tile's median (= fill) colour by more than 8 (16) levels in any channel (glass noise is about 4). 1563 of the 4387 tiles (35.6 %) contain at least one speck (2036 specks; 29 % of tiles and 1596 specks at > 16 levels). Area: median 12 px, p99 98 px, max 199 px (about 12 um2). Equivalent diameter: median 1.0 um, p99 2.8 um, **max 4.0 um**; longest bounding-box side: median 1.0 um, p99 3.7 um, max 6.5 um (the largest are elongated, 26 x 10 px, fibre-like). 97 % are under 2 um, all under 5 um. This is bounded by the rule itself: at most 0.5 % of a 256-px tile (328 px, about 20 um2, 5 um diameter) per tail can lie outside the robust range. Largest single-pixel deviation per tile: median 5, p95 55, max 163 levels. Not measured: layers 1-5 (the same pixel bound is 4x larger in area per layer step, about 10 um at layer 1), other frame sizes, other slides, and what the specks are (dust, debris or stain; the data cannot say).
 - **Fill colour:** the median colour of the omitted glass tiles is RGB (228, 230, 233); their tile medians lie within 1 level (95th percentile) and 2 levels (max) of it at T = 4 (up to 3 to 6 levels at T = 8 to 16). A single Recommended Absent Pixel colour can match either the glass or the pure-white filler bands, not both (the bands lie outside the scan, so showing them as glass colour is arguably natural, but that is a visual-review item).
 - B is lossy: omitted tiles lose the sensor noise (about 4 levels) and any specks. Visual review material is in `transcoding_review/` (README.txt there): masks for A, R4 and S16, single-fill previews, x16 difference images and full-resolution crops of borderline and speck cases.
 - Not included: DICOM per-frame functional-group metadata (assumed 250 B/frame, not measured), the exact-pixel colour route (about 2 to 4 times larger, 8g), and any decision on which tiles are acceptable to omit.
 
+## 8i. Target RGB instead of YBR_RCT **[moved]**
+
+Moved to [Color_Conversion_Claude.md](Color_Conversion_Claude.md), section C3. Summary: every RGB channel carries Y; exact route 3.0x (YBR_RCT 2.1x) the iSyntax size, wavelet-domain route 1.6-1.8x and biased in all channels.
+
 ## 9. Tools (`tools/v1_analysis/`, see its README.txt)
 
-`halo_1d.py`, `frame_interior_test.py`, `strip_halo.py`, `windowed_idwt_halo.py`, `dicom_tile_tests.py`, `colour_ebcot_probe.py`, `colour_bias_by_levels.py`, `colour_sparsity_cost.py`, `colour_dc_fix.py`, `midpoint_probe.py`, `openjpeg_convention_check.py`, `openjpeg_ebcot_sizes.py`, `openjpeg_empty_plane_cost.py`, `omission_size_estimate.py`, `omission_summary.py`, `omission_review_images.py`, `count_chunks.py`, `rct_ycocg_vs_rct.py`, `ll_probe.py`. All read-only; the decoder is untouched.
+`halo_1d.py`, `frame_interior_test.py`, `strip_halo.py`, `windowed_idwt_halo.py`, `dicom_tile_tests.py`, `colour_ebcot_probe.py`, `colour_bias_by_levels.py`, `colour_sparsity_cost.py`, `colour_dc_fix.py`, `rgb_route_probe.py`, `midpoint_probe.py`, `openjpeg_convention_check.py`, `openjpeg_ebcot_sizes.py`, `openjpeg_empty_plane_cost.py`, `omission_size_estimate.py`, `omission_summary.py`, `omission_review_images.py`, `count_chunks.py`, `rct_ycocg_vs_rct.py`, `ll_probe.py`. All read-only; the decoder is untouched.

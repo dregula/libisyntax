@@ -4,6 +4,10 @@ import sys, re, base64, struct, math, csv
 path=sys.argv[1]; out=sys.argv[2]
 f=open(path,'rb')
 head=f.read(8*1024*1024)
+while head.find(b'\r\n\x04')<0:          # the XML header of the larger files exceeds 8 MB: keep reading until the EOT marker
+    more=f.read(8*1024*1024)
+    if not more: raise SystemExit('no EOT marker found')
+    head+=more
 eot=head.find(b'\r\n\x04'); xml=head[:eot].decode('utf-8')
 data_pos=eot+3
 # --- WSI general info from XML (regex; no base64 decode of images)

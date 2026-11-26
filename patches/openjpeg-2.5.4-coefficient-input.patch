@@ -1,0 +1,108 @@
+diff --git a/src/lib/openjp2/j2k.h b/src/lib/openjp2/j2k.h
+index bcf70a4..a5e5109 100644
+--- a/src/lib/openjp2/j2k.h
++++ b/src/lib/openjp2/j2k.h
+@@ -412,6 +412,11 @@ typedef struct opj_cp {
+     /** OPJ_TRUE if entire bit stream must be decoded, OPJ_FALSE if partial bitstream decoding allowed */
+     OPJ_BOOL strict;
+ 
++    /* iSyntax transcoder patch: OPJ_TRUE = the tile data handed to the encoder are
++       already level-shifted, colour-transformed 5/3 DWT coefficients (Mallat layout, int32).
++       The encoder then skips DC level shift, MCT and DWT and goes straight to Tier-1. */
++    OPJ_BOOL m_coeff_input;
++
+     /* UniPG>> */
+ #ifdef USE_JPWL
+     /** enables writing of EPC in MH, thus activating JPWL */
+diff --git a/src/lib/openjp2/openjpeg.c b/src/lib/openjp2/openjpeg.c
+index 382d8f4..0d72b4e 100644
+--- a/src/lib/openjp2/openjpeg.c
++++ b/src/lib/openjp2/openjpeg.c
+@@ -407,6 +407,22 @@ void OPJ_CALLCONV opj_set_default_decoder_parameters(opj_dparameters_t
+ }
+ 
+ 
++OPJ_BOOL OPJ_CALLCONV opj_set_coefficient_input(opj_codec_t *p_codec,
++        OPJ_BOOL enable)
++{
++    if (p_codec) {
++        opj_codec_private_t * l_codec = (opj_codec_private_t *) p_codec;
++        if (!l_codec->is_decompressor) {
++            /* only valid for a codec made with opj_create_compress(OPJ_CODEC_J2K):
++               m_codec is then an opj_j2k_t (for OPJ_CODEC_JP2 it would be an opj_jp2_t) */
++            opj_j2k_t * l_j2k = (opj_j2k_t *) l_codec->m_codec;
++            l_j2k->m_cp.m_coeff_input = enable;
++            return OPJ_TRUE;
++        }
++    }
++    return OPJ_FALSE;
++}
++
+ OPJ_BOOL OPJ_CALLCONV opj_codec_set_threads(opj_codec_t *p_codec,
+         int num_threads)
+ {
+diff --git a/src/lib/openjp2/openjpeg.h b/src/lib/openjp2/openjpeg.h
+index fe2f1ee..6e30df6 100644
+--- a/src/lib/openjp2/openjpeg.h
++++ b/src/lib/openjp2/openjpeg.h
+@@ -1387,6 +1387,18 @@ OPJ_API OPJ_BOOL OPJ_CALLCONV opj_decoder_set_strict_mode(opj_codec_t *p_codec,
+ OPJ_API OPJ_BOOL OPJ_CALLCONV opj_codec_set_threads(opj_codec_t *p_codec,
+         int num_threads);
+ 
++/**
++ * iSyntax transcoder patch (not in upstream OpenJPEG).
++ * Switch a J2K (raw codestream) compressor to "coefficient input" mode: the data passed to
++ * opj_write_tile() are int32 (4 bytes per sample, all components) wavelet coefficients, in the
++ * layout opj_dwt_encode() would have produced (Mallat: LL top-left, per resolution HL right,
++ * LH below, HH diagonal; row stride = tile width), already DC-level-shifted and, if the
++ * codestream signals MCT, already colour-transformed. DC shift, MCT and DWT are skipped.
++ * Call after opj_setup_encoder() and before opj_start_compress(). Reversible (5/3) only.
++ */
++OPJ_API OPJ_BOOL OPJ_CALLCONV opj_set_coefficient_input(opj_codec_t *p_codec,
++        OPJ_BOOL enable);
++
+ /**
+  * Decodes an image header.
+  *
+diff --git a/src/lib/openjp2/tcd.c b/src/lib/openjp2/tcd.c
+index 8ca259b..068d86c 100644
+--- a/src/lib/openjp2/tcd.c
++++ b/src/lib/openjp2/tcd.c
+@@ -1490,6 +1490,9 @@ OPJ_BOOL opj_tcd_encode_tile(opj_tcd_t *p_tcd,
+         }
+         /* << INDEX */
+ 
++        /* iSyntax patch: in coefficient-input mode the tile data are already level-shifted,
++           colour-transformed DWT coefficients, so steps 1 to 3 are skipped. */
++        if (!p_tcd->cp->m_coeff_input) {
+         /* FIXME _ProfStart(PGROUP_DC_SHIFT); */
+         /*---------------TILE-------------------*/
+         if (! opj_tcd_dc_level_shift_encode(p_tcd)) {
+@@ -1508,6 +1511,7 @@ OPJ_BOOL opj_tcd_encode_tile(opj_tcd_t *p_tcd,
+             return OPJ_FALSE;
+         }
+         /* FIXME  _ProfStop(PGROUP_DWT); */
++        }
+ 
+         /* FIXME  _ProfStart(PGROUP_T1); */
+         if (! opj_tcd_t1_encode(p_tcd)) {
+@@ -2456,6 +2460,9 @@ OPJ_SIZE_T opj_tcd_get_encoder_input_buffer_size(opj_tcd_t *p_tcd)
+         if (l_size_comp == 3) {
+             l_size_comp = 4;
+         }
++        if (p_tcd->cp->m_coeff_input) {
++            l_size_comp = 4; /* iSyntax patch: int32 coefficients */
++        }
+ 
+         l_data_size += l_size_comp * ((OPJ_SIZE_T)(l_tilec->x1 - l_tilec->x0) *
+                                       (OPJ_SIZE_T)(l_tilec->y1 - l_tilec->y0));
+@@ -2719,6 +2726,9 @@ OPJ_BOOL opj_tcd_copy_tile_data(opj_tcd_t *p_tcd,
+         if (l_size_comp == 3) {
+             l_size_comp = 4;
+         }
++        if (p_tcd->cp->m_coeff_input) {
++            l_size_comp = 4; /* iSyntax patch: int32 coefficients */
++        }
+ 
+         switch (l_size_comp) {
+         case 1: {

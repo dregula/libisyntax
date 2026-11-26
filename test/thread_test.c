@@ -84,15 +84,13 @@ void parallel_run(int (*func)(void*), void* arg, bool force_sync) {
 }
 
 extern atomic_int dbgctr_init_thread_pool_counter;
-extern atomic_int dbgctr_init_global_mutexes_created;
 
 int test_libisyntax_init(void* arg) {
   clock_t current_clock = clock();
   isyntax_error_t result = libisyntax_init();
-  printf("test_print tid=%ld currect_clock=%ld result=%d init_counter=%d mutexes_created_counter=%d\n",
+  printf("test_print tid=%ld currect_clock=%ld result=%d init_counter=%d\n",
          thrd_current(), current_clock, result,
-         atomic_load(&dbgctr_init_thread_pool_counter),
-         atomic_load(&dbgctr_init_global_mutexes_created));
+         atomic_load(&dbgctr_init_thread_pool_counter));
   return (int)result;
 }
 

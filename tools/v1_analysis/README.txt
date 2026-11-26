@@ -31,3 +31,7 @@
 #   <venv>/python3 -B -I omission_size_estimate.py <file> <blocks.csv> [outdir] [sizes]   # per-tile stats + real OpenJPEG size of every tile of every layer (16 processes, about 4 minutes), writes tile_stats_F*_L*.csv
 #   python3 -B -I omission_summary.py [dir]                                           # savings of omission strategies A / B(robust T) / strict S from those CSVs
 #   <venv>/python3 -B -I omission_review_images.py <file> <blocks.csv> [dir] [F]      # PNGs for the visual review: masks, single-fill previews, diffs x16, full-resolution crops
+#   <venv>/python3 -B -I rgb_route_probe.py <file> <blocks.csv> [A] [B] [C]   # DICOM Photometric Interpretation RGB (mct=0): wavelet-domain error (A), sparsity of R/G/B (B), OpenJPEG sizes versus YBR_RCT (C); needs blocks.csv from parse_v1.py
+#   <venv>/python3 -B -I compare_sdk_tiff_tiles.py <c_decoder run folder> <iSyntax_test_materials> [PAS]   # C-decoder tile PNGs vs the Philips SDK LZW TIFF levels 2/3/5: which YCoCg->RGB inverse the SDK uses
+#   <venv>/python3 -B -I speck_size_analysis.py <file> <blocks.csv> [stats_dir] [T=4] [F=256] [out.csv]   # size (px, um) of the specks inside tiles that the robust-range omission rule would delete
+#   <venv>/python3 -B -I make_coeff_test_frames.py <file> <blocks.csv> <outdir>   # RGB + YBR_RCT coefficient (Mallat layout) test frames for the patched-OpenJPEG test, see tools/transcode_tests/

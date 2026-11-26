@@ -17,7 +17,12 @@ from hulsken_v1 import decode_block_v1
 
 # ---------------------------------------------------------------- file / block decoding (as reconstruct_np.py)
 def open_file(path, csvp):
-    head = open(path, 'rb').read(8 * 1024 * 1024); eot = head.find(b'\r\n\x04'); xml = head[:eot].decode('utf-8')
+    f_ = open(path, 'rb'); head = f_.read(8 * 1024 * 1024)
+    while head.find(b'\r\n\x04') < 0:                 # the XML header of the larger files exceeds 8 MB
+        more = f_.read(8 * 1024 * 1024)
+        if not more: raise SystemExit('no EOT marker found')
+        head += more
+    eot = head.find(b'\r\n\x04'); xml = head[:eot].decode('utf-8')
     gh = xml[xml.index('UFS_IMAGE_GENERAL_HEADERS'):]
     gr = [tuple(map(int, r.split())) for r in re.findall(r'Name="UFS_IMAGE_DIMENSION_RANGE"[^>]*>([^<]*)<', gh)][:5]
     g = dict(Wp=(gr[0][2] - gr[0][0] + gr[0][1]) // gr[0][1], Hp=(gr[1][2] - gr[1][0] + gr[1][1]) // gr[1][1],

@@ -15,3 +15,9 @@ reconfigure/
 *.xml
 
 .vscode/settings.json
+
+ext/
+build-*/
+.venv/
+__pycache__/
+*.pyc
