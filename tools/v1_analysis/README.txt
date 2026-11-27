@@ -37,3 +37,5 @@
 #   <venv>/python3 -B -I compare_sdk_tiff_tiles.py <c_decoder run folder> <iSyntax_test_materials> [PAS]   # C-decoder tile PNGs vs the Philips SDK LZW TIFF levels 2/3/5: which YCoCg->RGB inverse the SDK uses
 #   <venv>/python3 -B -I speck_size_analysis.py <file> <blocks.csv> [stats_dir] [T=4] [F=256] [out.csv]   # size (px, um) of the specks inside tiles that the robust-range omission rule would delete
 #   <venv>/python3 -B -I make_coeff_test_frames.py <file> <blocks.csv> <outdir>   # RGB + YBR_RCT coefficient (Mallat layout) test frames for the patched-OpenJPEG test, see tools/transcode_tests/
+#   python3 -B -I halo_strategy_footprint.py <file> <blocks.csv> [F=256] [D=5] [h=4]   # index-only: blocks/bytes/transform work per frame for STRIP vs THIN (per-frame tasks, LRU cache sweep) vs RECRUIT (whole neighbour tiles); env UNION=1 adds the shared-strip lower bound (small files only)
+#   python3 -B -I halo_strategy_costmodel.py <footprint.log> <file bytes> [coded_ratio]   # core-second model from those logs (constants measured with tools/transcode_tests/bench_decode.c, bench_idwt.c)
