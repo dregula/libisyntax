@@ -59,6 +59,8 @@ Still open:
 
 Two build systems (keep both working): CMake and Meson. Output binaries land in the repo root (CMake) or `builddir/` (Meson).
 
+**Baseline build (decided 2026-11-26): Linux + Meson with `-mssse3`, directory `build-ssse3/`.** Use it for running and testing, and say so when reporting output; it selects the SIMD floor (`>>1`) colour path and matches the cmake-native output byte for byte (see the notes below). Create and build it with `meson setup build-ssse3 -Dc_args=-mssse3 && ninja -C build-ssse3`. `builddir/` (plain `-O3`, scalar `/2` colour path) is only for comparing the two rounding paths.
+
 ```bash
 # Meson (a configured ./builddir exists)
 meson setup builddir         # first time; add -Dtests=true for tests
@@ -81,7 +83,7 @@ Notes:
 
 ## Running the C decoder and storing its output for Claude
 
-**Who runs what.** Claude's own sessions cannot execute compiled binaries (the permission system blocked it twice; do not try to work around that). So **you run the C decoder in a normal terminal, store the output in the folder below, and tell Claude the run folder**. Claude then reads the files (PNG, JPEG, logs, checksums) and compares them with the independent numpy reconstruction. Claude *can* run Python (`.venv/bin/python3 -I`, numpy 2.5) and the read-only tools in `tools/v1_analysis/`.
+**Who runs what.** Earlier Claude sessions were blocked from executing compiled binaries (the permission system blocked it twice); a session on 2026-11-26 did run `isyntax_coefficients` from `build-ssse3/` without trouble. If a run is blocked, do not try to work around it: **you run the C decoder in a normal terminal, store the output in the folder below, and tell Claude the run folder**. Claude then reads the files (PNG, JPEG, logs, checksums) and compares them with the independent numpy reconstruction. Claude *can* run Python (`.venv/bin/python3 -I`, numpy 2.5) and the read-only tools in `tools/v1_analysis/`.
 
 **Where the output goes** (outside the repository, next to the other example folders; override with `C_DECODER_OUTPUT`):
 
@@ -156,7 +158,7 @@ which, for every level 0 tile, finds the pixel offset between the C tile and the
 
 | File | Role |
 |---|---|
-| `libisyntax.h/.c` | Public C API: open, level/tile queries, `libisyntax_tile_read`, `read_region`, label/macro images, metadata getters, cache. **Added in this fork:** `libisyntax_tile_read_coefficients` (stored H coefficients at any level, LL at the coarsest level; no IDWT, no colour conversion, no cache, no lock; thread-safe, each caller thread needs `libisyntax_thread_init`), implemented by `isyntax_read_tile_coefficients` in `isyntax_reader.c`; example `src/examples/isyntax_coefficients.c` (compiled, **not yet run**). Purely additive: existing code paths are unchanged, so the comments-only identity check no longer holds for `isyntax_reader.c`. |
+| `libisyntax.h/.c` | Public C API: open, level/tile queries, `libisyntax_tile_read`, `read_region`, label/macro images, metadata getters, cache. **Added in this fork:** `libisyntax_tile_read_coefficients` (stored H coefficients at any level, LL at the coarsest level; no IDWT, no colour conversion, no cache, no lock; thread-safe, each caller thread needs `libisyntax_thread_init`), implemented by `isyntax_read_tile_coefficients` in `isyntax_reader.c`; example `src/examples/isyntax_coefficients.c` (**run 2026-11-26 on `build-ssse3`**: output identical to the independent Python decoder on 3 tiles of `1.isyntax` at levels 0, 2 and 4; serial and 8 to 16 thread reads identical on 12,288 tiles of `1.isyntax` and `5.isyntax`). Purely additive: existing code paths are unchanged, so the comments-only identity check no longer holds for `isyntax_reader.c`. |
 | `isyntax/isyntax.h` | All core structs and the header enums. **Read first.** |
 | `isyntax/isyntax.c` (3.7k lines) | XML header parsing, Hulsken decoder, IDWT tile driver, YCoCg→RGB, `isyntax_open`. |
 | `isyntax/isyntax_dwt.c` | 5/3 inverse lifting, adapted from OpenJPEG (BSD-2). **`#include`d into `isyntax.c`**, not compiled separately. |

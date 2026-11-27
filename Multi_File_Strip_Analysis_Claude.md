@@ -73,7 +73,7 @@ Stock OpenJPEG Tier-1 is the code the patched coefficient-input encoder runs (Pi
 
 ## 5. Related code added in this branch
 
-- `libisyntax_tile_read_coefficients()` and helpers (`libisyntax.h`, `isyntax_reader.c`): stored H (any level) and LL (coarsest level only) coefficients of a tile, lock-free and thread-safe, no pixels. Example program `isyntax_coefficients` (serial-versus-parallel self-check). Compiled with Meson but **not run** (Claude sessions cannot execute compiled binaries); the owner should run `isyntax_coefficients FILE 0 all 8`.
+- `libisyntax_tile_read_coefficients()` and helpers (`libisyntax.h`, `isyntax_reader.c`): stored H (any level) and LL (coarsest level only) coefficients of a tile, lock-free and thread-safe, no pixels. Example program `isyntax_coefficients` (serial-versus-parallel self-check). **[verified]** Run on `build-ssse3` (baseline build: Linux, Meson, `-mssse3`) on 2026-11-26: tiles of `1.isyntax` at levels 0, 2 and 4 are identical to the independent Python decoder (2 845 / 136 309 / 122 627 nonzero coefficients compared); reading every tile of a level serially and from 8 to 16 threads gives identical results (12 288 tiles of `1.isyntax` level 0, 768 at level 2, 12 288 of `5.isyntax` level 2; no read errors); the coarsest-level LL works and LL at another level returns `INVALID_ARGUMENT`; the tile dump is byte-identical to the one from `builddir/`. Not tested: sanitizers or a thread checker, CMake, Windows. Command: `build-ssse3/isyntax_coefficients FILE 0 all 8`.
 - Per-file results: `$SOURCEROOT/c_decoder_output/strip_analysis/<file>/` (blocks.csv, exhaustive.log, stream_stats.log, strips/out.log, strips/time.log; file 1 also `old_reconstruct/`, `tier1_profile.log`).
 
 ## 6. Reproduce
