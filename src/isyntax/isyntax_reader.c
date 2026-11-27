@@ -441,3 +441,65 @@ void isyntax_tile_read(isyntax_t* isyntax, isyntax_cache_t* cache, int scale, in
 
     platform_mutex_unlock(&cache->mutex);
 }
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Raw coefficient access (added in this fork; see isyntax_reader.h). Mirrors the codeblock lookup of
+// isyntax_openslide_load_tile_coefficients() above but writes into a caller buffer instead of cache blocks, so it needs
+// neither the cache nor its mutex. It only reads data that is immutable after isyntax_open().
+// ---------------------------------------------------------------------------------------------------------------------
+bool isyntax_read_tile_coefficients(isyntax_t* isyntax, int scale, int tile_x, int tile_y, bool want_ll,
+                                    i16* out_coefficients, bool* out_is_all_zero) {
+    isyntax_image_t* wsi = &isyntax->images[isyntax->wsi_image_index];
+    const size_t block_values = (size_t)isyntax->block_width * isyntax->block_height;
+    const int bands = want_ll ? 1 : 3;
+    if (scale < 0 || scale > wsi->max_scale) return false;
+    if (want_ll && scale != wsi->max_scale) return false;
+    isyntax_level_t* level = &wsi->levels[scale];
+    if (tile_x < 0 || tile_x >= level->width_in_tiles || tile_y < 0 || tile_y >= level->height_in_tiles) return false;
+    isyntax_tile_t* tile = &level->tiles[(size_t)level->width_in_tiles * tile_y + tile_x];
+
+    *out_is_all_zero = true;
+    if (!tile->exists) {
+        memset(out_coefficients, 0, 3 * bands * block_values * sizeof(i16));
+        return true;
+    }
+
+    isyntax_data_chunk_t* chunk = &wsi->data_chunks[tile->data_chunk_index];
+    i32 codeblock_index;
+    if (want_ll) {
+        codeblock_index = (i32)tile->codeblock_index;
+    } else {
+        i32 scale_in_chunk = chunk->scale - tile->tile_scale;
+        if (scale_in_chunk < 0 || scale_in_chunk >= 3) return false;
+        i32 index_in_chunk = 0;
+        if (scale_in_chunk == 1)      index_in_chunk = 1 + (tile->tile_y % 2) * 2 + (tile->tile_x % 2);
+        else if (scale_in_chunk == 2) index_in_chunk = 5 + (tile->tile_y % 4) * 4 + (tile->tile_x % 4);
+        codeblock_index = (i32)tile->codeblock_chunk_index + index_in_chunk;
+    }
+
+    for (int color = 0; color < 3; ++color) {
+        isyntax_codeblock_t* codeblock = &wsi->codeblocks[codeblock_index + color * chunk->codeblock_count_per_color];
+        if (codeblock->coefficient != (want_ll ? 0u : 1u) || codeblock->color_component != (u32)color ||
+            codeblock->scale != (u32)scale) {
+            return false;   // the index arithmetic does not point at the expected codeblock
+        }
+        i16* dest = out_coefficients + (size_t)color * bands * block_values;
+        if (codeblock->block_size <= 8) {
+            memset(dest, 0, bands * block_values * sizeof(i16));   // empty block decodes to zeros (as in isyntax_hulsken_decompress)
+            continue;
+        }
+        *out_is_all_zero = false;
+        // 7 safety bytes so the bit reader in isyntax_hulsken_decompress() may over-read, as in the cache path.
+        u8* data = (u8*)malloc(codeblock->block_size + 7);
+        if (!data) return false;
+        size_t bytes_read = file_handle_read_at_offset(data, isyntax->file_handle, codeblock->block_data_offset,
+                                                       codeblock->block_size);
+        if (bytes_read != codeblock->block_size) { free(data); return false; }
+        bool ok = isyntax_hulsken_decompress(data, codeblock->block_size, isyntax->block_width, isyntax->block_height,
+                                             codeblock->coefficient, wsi->compressor_version, dest);
+        free(data);
+        if (!ok) return false;
+    }
+    return true;
+}

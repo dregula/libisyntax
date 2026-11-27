@@ -123,6 +123,45 @@ int32_t libisyntax_get_tile_width(const isyntax_t* isyntax) {
     return isyntax->tile_width;
 }
 
+int32_t libisyntax_get_block_width(const isyntax_t* isyntax) {
+    return isyntax->block_width;
+}
+
+int32_t libisyntax_get_block_height(const isyntax_t* isyntax) {
+    return isyntax->block_height;
+}
+
+isyntax_error_t libisyntax_thread_init(void) {
+    // The Hulsken decoder uses a per-thread scratch arena (threadlocal_thread_memory). Threads created by the library's own
+    // pool and the thread that called libisyntax_init() already have one; threads created by the caller need this.
+    if (threadlocal_thread_memory == NULL) {
+        init_thread_memory(NULL);
+    }
+    return LIBISYNTAX_OK;
+}
+
+void libisyntax_thread_shutdown(void) {
+    destroy_thread_memory();
+}
+
+isyntax_error_t libisyntax_tile_read_coefficients(isyntax_t* isyntax, int32_t level, int64_t tile_x, int64_t tile_y,
+                                                  int32_t kind, int16_t* coefficients_buffer, int32_t* out_is_all_zero) {
+    if (kind != LIBISYNTAX_COEFFICIENTS_H && kind != LIBISYNTAX_COEFFICIENTS_LL) return LIBISYNTAX_INVALID_ARGUMENT;
+    isyntax_image_t* wsi = &isyntax->images[isyntax->wsi_image_index];
+    if (level < 0 || level > wsi->max_scale) return LIBISYNTAX_INVALID_ARGUMENT;
+    if (kind == LIBISYNTAX_COEFFICIENTS_LL && level != wsi->max_scale) return LIBISYNTAX_INVALID_ARGUMENT;
+    isyntax_level_t* lvl = &wsi->levels[level];
+    if (tile_x < 0 || tile_x >= lvl->width_in_tiles || tile_y < 0 || tile_y >= lvl->height_in_tiles) {
+        return LIBISYNTAX_INVALID_ARGUMENT;
+    }
+    libisyntax_thread_init();
+    bool all_zero = false;
+    bool ok = isyntax_read_tile_coefficients(isyntax, level, (int)tile_x, (int)tile_y,
+                                             kind == LIBISYNTAX_COEFFICIENTS_LL, coefficients_buffer, &all_zero);
+    if (out_is_all_zero) *out_is_all_zero = all_zero ? 1 : 0;
+    return ok ? LIBISYNTAX_OK : LIBISYNTAX_FATAL;
+}
+
 int32_t libisyntax_get_tile_height(const isyntax_t* isyntax) {
     return isyntax->tile_height;
 }

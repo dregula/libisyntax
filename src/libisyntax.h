@@ -124,6 +124,32 @@ isyntax_error_t libisyntax_read_region(isyntax_t* isyntax, isyntax_cache_t* isyn
                                        int32_t pixel_format);
 
 
+//== Raw wavelet coefficient API (added in this fork) ==
+// Delivers the stored wavelet coefficients of one tile, i.e. the decoded Hulsken codeblocks, instead of pixels:
+// no inverse DWT, no neighbour tiles, no YCoCg->RGB conversion, no cache. All values are int16 (sign-magnitude already
+// converted to two's complement). One 'block' is libisyntax_get_block_width() x libisyntax_get_block_height()
+// (128 x 128 in all known files); a tile at level L covers 2 x 2 blocks of pixels at that level's resolution.
+//   LIBISYNTAX_COEFFICIENTS_H : out[color][band][block_h][block_w], color 0/1/2 = Y/Co/Cg, band 0/1/2 = HL/LH/HH.
+//                               Buffer: 3 * 3 * block_w * block_h int16. Available at every level.
+//   LIBISYNTAX_COEFFICIENTS_LL: out[color][block_h][block_w]. Buffer: 3 * block_w * block_h int16.
+//                               Only the coarsest level (level_count - 1) stores LL; asking for another level returns
+//                               LIBISYNTAX_INVALID_ARGUMENT. (Other levels' LL is a by-product of the inverse transform
+//                               of the parent tile, use libisyntax_tile_read() for pixels.)
+// *out_is_all_zero (may be NULL) is set to 1 if the tile does not exist or all its codeblocks are empty.
+// Thread safety: no locking and no shared mutable state; any number of threads may call this concurrently on the same
+// isyntax_t, with or without a cache. Each calling thread must have called libisyntax_thread_init() (called implicitly,
+// but then the 16 MB of thread memory is only released by libisyntax_thread_shutdown() or process exit).
+enum libisyntax_coefficient_kind_t {
+  LIBISYNTAX_COEFFICIENTS_H = 1,
+  LIBISYNTAX_COEFFICIENTS_LL = 2,
+};
+int32_t         libisyntax_get_block_width(const isyntax_t* isyntax);
+int32_t         libisyntax_get_block_height(const isyntax_t* isyntax);
+isyntax_error_t libisyntax_thread_init(void);
+void            libisyntax_thread_shutdown(void);
+isyntax_error_t libisyntax_tile_read_coefficients(isyntax_t* isyntax, int32_t level, int64_t tile_x, int64_t tile_y,
+                                                  int32_t kind, int16_t* coefficients_buffer, int32_t* out_is_all_zero);
+
 isyntax_error_t libisyntax_read_label_image(isyntax_t* isyntax, int32_t* width, int32_t* height,
                                                    uint32_t** pixels_buffer, int32_t pixel_format);
 isyntax_error_t libisyntax_read_macro_image(isyntax_t* isyntax, int32_t* width, int32_t* height,

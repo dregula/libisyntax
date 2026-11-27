@@ -90,6 +90,12 @@ isyntax_example = executable(
   dependencies: [libisyntax_dep],
 )
 
+executable(
+  'isyntax_coefficients',
+  'src/examples/isyntax_coefficients.c',
+  dependencies: [libisyntax_dep, threads],
+)
+
 if tiff.found()
   executable(
     'isyntax-to-tiff',

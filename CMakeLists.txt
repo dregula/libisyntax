@@ -118,6 +118,9 @@ else()
 endif()
 
 # Build example program: isyntax_dirwalk.c
+add_executable(isyntax_coefficients src/examples/isyntax_coefficients.c)
+target_link_libraries(isyntax_coefficients isyntax pthread)
+
 add_executable(isyntax-dirwalk src/examples/isyntax_dirwalk.c)
 target_link_libraries(isyntax-dirwalk isyntax)
 
