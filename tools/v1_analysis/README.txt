@@ -9,6 +9,8 @@
 #   <venv>/python3 -I stream_stats.py <file.isyntax> <blocks.csv>   # Hulsken stream statistics (needs numpy)
 #   <venv>/python3 -I reconstruct_np.py <file.isyntax> <blocks.csv> <outdir> [downsample] [cx cy cw ch]   # full independent reconstruction (needs numpy, ~15 GB RAM)
 #   (set SAVE_PLANES=1 to also write the Y/Co/Cg planes as .npy files in <outdir>)
+#   <venv>/python3 -B -I reconstruct_strips.py <file.isyntax> <blocks.csv> <outdir> [downsample=32]   # same findings in BOUNDED memory (full-width row bands, windowed top-down IDWT, cached block rows, fork pool of JOBS=12 workers; 2-3.5 GB for 7-13 Gpx files); env BAND_MB=64, VERIFY_PLANES=<dir with Y/Co/Cg.npy> for a bit-exact check; wall time ~2.5 min per Gpx
+#   <venv>/python3 -B -I tier1_profile.py <file> <blocks.csv> <dir with tile_stats_F256_L*.csv> [out.csv] [frames/layer]   # single-core OpenJPEG Tier-1+2 timing on real 256-px frames, whole-pyramid core-seconds extrapolation
 # --- DICOM-WSI transcoding exploration (see ../../iSyntax_to_DICOM_WSI_Transcoding_Claude.md); all read-only, numpy needed unless noted ---
 #   python3 -I halo_1d.py                                      # pure Python: width of the frame-edge halo, seamless vs mirrored 5/3 (1-D, synthetic)
 #   <venv>/python3 -I frame_interior_test.py <file> <blocks.csv>   # real file: stored coefficients vs J2K per-frame forward transform (phase + interior-copy test)

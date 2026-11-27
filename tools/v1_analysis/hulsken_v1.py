@@ -39,7 +39,7 @@ def decode_block_v1(data, ncoef, npx=128*128):
         dd = max(d, 1)
         for hi in range(1 << (maxl - dd)):
             table[c | (hi << dd)] = (sym, dd)
-    zr_code, zr_size = codes[zr_sym][0], max(codes[zr_sym][1], 1)
+    zr_code, zr_size = codes.get(zr_sym, (0, 0))[0], max(codes.get(zr_sym, (0, 0))[1], 1)   # zero-run symbol may be absent from the tree (never used): isyntax.c leaves code 0 in that case
     zr_mask = (1 << zr_size) - 1
     cmask = (1 << zr_bits) - 1
     out = bytearray()
