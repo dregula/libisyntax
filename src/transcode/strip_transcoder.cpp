@@ -241,7 +241,8 @@ static Pyr build_frame(Engine& e, int k, int i0y, int i0x, int F, int D, int h) 
 }
 static Mat pixel_frame(Engine& e, int k, int i0y, int i0x, int F) {                    // frame_from_decode(): decoded part, zero filler outside the array
     int R = 2 * e.g.R(k), C = 2 * e.g.C(k), y0 = std::max(i0y, 0), x0 = std::max(i0x, 0), y1 = std::min(i0y + F, R), x1 = std::min(i0x + F, C);
-    Mat fr(F, F); if (y1 > y0 && x1 > x0) paste(fr, y0 - i0y, x0 - i0x, e.out_region(k, y0, y1, x0, x1)); return fr;
+    Mat fr(F, F); if (e.c == 0) std::fill(fr.v.begin(), fr.v.end(), 255);                    // outside the array: white (Y = 255, Co = Cg = 0), as the iSyntax margin filler
+    if (y1 > y0 && x1 > x0) paste(fr, y0 - i0y, x0 - i0x, e.out_region(k, y0, y1, x0, x1)); return fr;
 }
 static Pyr const_pyramid(int F, int D, i32 v) { Pyr p; for (int j = 0; j < D; j++) { int n = F >> (j + 1); p.lv.push_back({Mat(n, n), Mat(n, n), Mat(n, n)}); } p.LL = Mat(F >> D, F >> D); std::fill(p.LL.v.begin(), p.LL.v.end(), v); return p; }
 
@@ -323,7 +324,7 @@ struct Pool {                                                  // persistent wor
 // ------------------------------------------------------------------------------------------------ the driver
 struct Opt {
     std::string file, csv, dumpdir; int F = 256, D = 5, h = 4, threads = 8, S = 16, prefilter = -1, verify_every = 0, layer_lo = 0, layer_hi = 99, omit_layers = 2, max_rows = 0;
-    std::string dicom_dir, icc = DEFAULT_ICC; double orient[6] = {1, 0, 0, 0, 1, 0};
+    std::string dicom_dir, icc = DEFAULT_ICC; double orient[6] = {0, -1, 0, -1, 0, 0};
     bool trunc_ = true, encode = true, fastpath = true, audit = false, roundtrip = false, oob = false; std::vector<std::array<int, 3>> dumps;
 };
 struct Stat { std::atomic<long> const_omit{0}, frames{0}, interior{0}, edge{0}, fast{0}, omitted{0}, prefilter_pass{0}, encoded{0}, verified{0}, verify_bad{0}, rt_checked{0}, rt_bad{0}, audit_false_reject{0}, audit_omit{0}, fast_verified{0}, fast_bad{0}; std::atomic<long> bytes{0};
@@ -367,14 +368,22 @@ int main(int argc, char** argv) {
         auto cs = std::make_shared<std::vector<uint8_t>>(); if (!encode_frame(coef.data(), F, *cs)) die("constant frame encode failed");
         std::lock_guard<std::mutex> lk(ccmu); ccache[key] = cs; return cs;
     };
+    // Frame grids of all layers (dicom_tile_tests.py axis_grid, changed): every layer's matrix origin must lie on a common position, otherwise viewers (wsidicom: origin threshold 0.01 mm)
+    // treat the layers as different pyramids. Sample i of layer k sits at 2^k (i + 3) - 2 (padded level-0 units) and the J2K alignment needs (i_base + 3) % 32 == 0, so the layer
+    // origins can be put on the common grid 2^(top+5) M; the remaining spread is only the sample-centre offsets (<= 2^(top-1) units = 4 um at top = 5).
+    struct Ax { int i_base = 0, tiles = 0; i64 cols = 0; };
+    std::vector<Ax> GY(g.L), GX(g.L);
+    for (int axis = 0; axis < 2; axis++) {
+        int nvalid = axis ? Wv : Hv; std::vector<i64> ilo(g.L), ihi(g.L); i64 M = -1;
+        for (int k = 0; k < g.L; k++) {
+            auto p = [&](i64 i) { return (double)((i64)1 << k) * (double)(i + 3) - 2.0; }; double half = (double)(1 << k) / 2; i64 lo = 0; while (p(lo) + half <= (double)g.pad - 0.5) lo++;
+            i64 hi = lo; while (p(hi + 1) - half < (double)(g.pad + nvalid) - 0.5) hi++; ilo[k] = lo; ihi[k] = hi;
+            i64 q = (lo + 3) / ((i64)32 << (g.top - k)); M = M < 0 ? q : std::min(M, q);
+        }
+        for (int k = 0; k < g.L; k++) { Ax a; a.i_base = (int)(((i64)32 << (g.top - k)) * M - 3); a.cols = ihi[k] - a.i_base + 1; a.tiles = (int)((a.cols + F - 1) / F); (axis ? GX : GY)[k] = a; }
+    }
     for (int k = std::max(0, o.layer_lo); k <= std::min(g.top, o.layer_hi); k++) {
-        // frame grid of the layer (dicom_tile_tests.py axis_grid)
-        auto grid = [&](int nvalid, int& i_base, int& tiles, i64& cols_out) {
-            auto p = [&](i64 i) { return (double)((i64)1 << k) * (double)(i + 3) - 2.0; }; double half = (double)(1 << k) / 2; i64 i_lo = 0; while (p(i_lo) + half <= (double)g.pad - 0.5) i_lo++;
-            i64 i_hi = i_lo; while (p(i_hi + 1) - half < (double)(g.pad + nvalid) - 0.5) i_hi++;
-            i_base = (int)(((i_lo + 3) / ((i64)1 << D)) * ((i64)1 << D) - 3); i64 cols = i_hi - i_base + 1; cols_out = cols; tiles = (int)((cols + F - 1) / F);
-        };
-        int iby, tiy, ibx, tix; i64 mcy, mcx; grid(Hv, iby, tiy, mcy); grid(Wv, ibx, tix, mcx);
+        int iby = GY[k].i_base, tiy = GY[k].tiles, ibx = GX[k].i_base, tix = GX[k].tiles; i64 mcy = GY[k].cols, mcx = GX[k].cols;
         int R = 2 * g.R(k), C = 2 * g.C(k);
         printf("layer %d: %d x %d frames (origin %d,%d)\n", k, tix, tiy, ibx, iby); fflush(stdout);
         FILE* spool = nullptr; std::string spool_path; std::vector<uint64_t> offs, lens; uint64_t spool_pos = 0; long cs_total = 0;
@@ -441,6 +450,7 @@ int main(int argc, char** argv) {
                     for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, cvv[c]); have_py = true; fr.path = 'F'; st.fast++; st.t_fast_ns += (long)((now() - tc) * 1e9);
                     if (o.verify_every && (st.fast % o.verify_every == 0)) { st.fast_verified++; for (int c = 0; c < 3; c++) { Pyr ref = build_frame(eng[c], k, f.i0y, f.i0x, F, D, h); if (!same(ref, py[c])) { st.fast_bad++; break; } } }
                 }
+                if (!have_py && f.edge && f.plan.blocks.empty()) { for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, c == 0 ? 255 : 0); have_py = true; fr.path = 'F'; st.fast++; }   // padding frame: white
                 if (!have_py) {
                     if (f.edge || have_pix) { double tp = now(); if (!have_pix) for (int c = 0; c < 3; c++) pix[c] = pixel_frame(eng[c], k, f.i0y, f.i0x, F); for (int c = 0; c < 3; c++) py[c] = full_pyramid(pix[c], D); fr.path = 'P'; st.t_pixel_ns += (long)((now() - tp) * 1e9); }
                     else { double tb2 = now(); for (int c = 0; c < 3; c++) py[c] = build_frame(eng[c], k, f.i0y, f.i0x, F, D, h); st.t_build_ns += (long)((now() - tb2) * 1e9); }
@@ -480,7 +490,11 @@ int main(int argc, char** argv) {
             fclose(spool); if (rows != tiy) die("--dicom needs all frame rows (no --max-rows)");
             LayerMeta m; m.layer = k; m.rows = m.cols = F; m.frames_x = tix; m.frames_y = tiy; m.matrix_cols = (long)mcx; m.matrix_rows = (long)mcy; m.spacing_mm = 0.00025 * (double)(1 << k); m.resampled = k > 0;
             double ox = libisyntax_image_get_offset_x(wsi), oy = libisyntax_image_get_offset_y(wsi), pxl = (double)(1 << k);            // level-0 units of 0.25 um; sample i is centred at ox + 2^k (i + 3) - 2
-            m.origin_x_mm = (ox + pxl * (ibx + 3) - 2.0 - pxl / 2) * 0.00025; m.origin_y_mm = (oy + pxl * (iby + 3) - 2.0 - pxl / 2) * 0.00025; for (int q = 0; q < 6; q++) m.orientation[q] = o.orient[q];
+            // Placeholder mapping (owner will establish SlideScape's orientation): slide position of pixel (r, c) = (X0 + dr_x r s + dc_x c s, Y0 + dr_y r s + dc_y c s) with the row direction (a,b) = (c increasing)
+            // and the column direction (cx,cy) = (r increasing); X0, Y0 are chosen so that the layer-0 matrix starts at the iSyntax corner (ox, oy) in the lower-left of its slide bounding box.
+            double Bx = (ox + pxl * (ibx + 3) - 2.0 - pxl / 2) * 0.00025, By = (oy + pxl * (iby + 3) - 2.0 - pxl / 2) * 0.00025, W0 = (double)GX[0].cols * 0.00025, H0 = (double)GY[0].cols * 0.00025;
+            const double* oo = o.orient; double minx = std::min(0.0, oo[0] * W0) + std::min(0.0, oo[3] * H0), miny = std::min(0.0, oo[1] * W0) + std::min(0.0, oo[4] * H0);
+            m.origin_x_mm = Bx - minx; m.origin_y_mm = By - miny; for (int q = 0; q < 6; q++) m.orientation[q] = o.orient[q];
             std::string base = o.file; size_t sl = base.find_last_of("/\\"); if (sl != std::string::npos) base = base.substr(sl + 1); size_t dt = base.rfind('.'); if (dt != std::string::npos) base = base.substr(0, dt);
             m.source_name = base; m.study_uid = make_uid(base, "study"); m.series_uid = make_uid(base, "series"); m.for_uid = make_uid(base, "frame-of-reference"); m.specimen_uid = make_uid(base, "specimen"); m.dimorg_uid = make_uid(base, "dimorg");
             m.sop_uid = make_uid(base, "sop-layer-" + std::to_string(k));

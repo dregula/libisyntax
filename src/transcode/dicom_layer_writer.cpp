@@ -44,7 +44,7 @@ bool write_layer_file(const LayerMeta& m, const std::string& out_path, const std
     CHK(d->putAndInsertUint16(DCM_Rows, (Uint16)m.rows)); CHK(d->putAndInsertUint16(DCM_Columns, (Uint16)m.cols)); CHK(d->putAndInsertUint16(DCM_BitsAllocated, 8)); CHK(d->putAndInsertUint16(DCM_BitsStored, 8));
     CHK(d->putAndInsertUint16(DCM_HighBit, 7)); CHK(d->putAndInsertUint16(DCM_PixelRepresentation, 0)); CHK(d->putAndInsertString(DCM_NumberOfFrames, std::to_string(nframes).c_str()));
     CHK(d->putAndInsertString(DCM_BurnedInAnnotation, "NO")); CHK(d->putAndInsertString(DCM_SpecimenLabelInImage, "NO")); CHK(d->putAndInsertString(DCM_FocusMethod, "AUTO")); CHK(d->putAndInsertString(DCM_ExtendedDepthOfField, "NO"));
-    CHK(d->putAndInsertUint32(DCM_NumberOfOpticalPaths, 1)); CHK(d->putAndInsertUint16(DCM_NumberOfFocalPlanes, 1)); CHK(d->putAndInsertFloat32(DCM_DistanceBetweenFocalPlanes, 0.0f));
+    CHK(d->putAndInsertUint32(DCM_NumberOfOpticalPaths, 1)); CHK(d->putAndInsertUint32(DCM_TotalPixelMatrixFocalPlanes, 1));
     CHK(d->putAndInsertString(DCM_LossyImageCompression, "01"));
     { std::string meth = m.lossy_method.empty() ? "ISO_15444_1" : m.lossy_method + "\\ISO_15444_1", ratio = m.source_ratio > 0 ? ds(m.source_ratio) + "\\" + ds(m.our_ratio) : ds(m.our_ratio);
       CHK(d->putAndInsertString(DCM_LossyImageCompressionMethod, meth.c_str())); CHK(d->putAndInsertString(DCM_LossyImageCompressionRatio, ratio.c_str())); }
@@ -54,9 +54,10 @@ bool write_layer_file(const LayerMeta& m, const std::string& out_path, const std
     { std::string o; for (int i = 0; i < 6; i++) o += (i ? "\\" : "") + ds(m.orientation[i]); CHK(d->putAndInsertString(DCM_ImageOrientationSlide, o.c_str())); }
     { DcmItem* it = nullptr; CHK(d->findOrCreateSequenceItem(DCM_TotalPixelMatrixOriginSequence, it, -2)); CHK(it->putAndInsertString(DCM_XOffsetInSlideCoordinateSystem, ds(m.origin_x_mm).c_str())); CHK(it->putAndInsertString(DCM_YOffsetInSlideCoordinateSystem, ds(m.origin_y_mm).c_str())); }
     // ---- specimen, optical path
-    CHK(d->putAndInsertString(DCM_ContainerIdentifier, "SLIDE1"));
+    CHK(d->putAndInsertString(DCM_ContainerIdentifier, "SLIDE1")); CHK(d->insert(new DcmSequenceOfItems(DCM_IssuerOfTheContainerIdentifierSequence)));
+    CHK(d->insert(new DcmSequenceOfItems(DCM_AcquisitionContextSequence)));
     { DcmItem* it = nullptr; CHK(d->findOrCreateSequenceItem(DCM_ContainerTypeCodeSequence, it, -2)); code_item(it, "433466003", "SCT", "Microscope slide"); }
-    { DcmItem* it = nullptr; CHK(d->findOrCreateSequenceItem(DCM_SpecimenDescriptionSequence, it, -2)); CHK(it->putAndInsertString(DCM_SpecimenIdentifier, "SPECIMEN1")); CHK(it->putAndInsertString(DCM_SpecimenUID, m.specimen_uid.c_str()));
+    { DcmItem* it = nullptr; CHK(d->findOrCreateSequenceItem(DCM_SpecimenDescriptionSequence, it, -2)); CHK(it->putAndInsertString(DCM_SpecimenIdentifier, "SPECIMEN1")); CHK(it->insert(new DcmSequenceOfItems(DCM_IssuerOfTheSpecimenIdentifierSequence))); CHK(it->putAndInsertString(DCM_SpecimenUID, m.specimen_uid.c_str()));
       CHK(it->insert(new DcmSequenceOfItems(DCM_SpecimenPreparationSequence))); }
     { DcmItem* it = nullptr; CHK(d->findOrCreateSequenceItem(DCM_OpticalPathSequence, it, -2)); CHK(it->putAndInsertString(DCM_OpticalPathIdentifier, "1"));
       std::ifstream f(m.icc_path, std::ios::binary); std::vector<char> icc((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()); if (icc.empty()) { err = "ICC profile not readable: " + m.icc_path; return false; }

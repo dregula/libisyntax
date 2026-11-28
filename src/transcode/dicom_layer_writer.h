@@ -12,7 +12,7 @@ struct LayerMeta {
     long matrix_cols = 0, matrix_rows = 0;                    // Total Pixel Matrix
     double spacing_mm = 0.00025;                              // pixel spacing of this layer (0.25 um x 2^layer)
     double origin_x_mm = 0, origin_y_mm = 0;                  // slide-coordinate position of the top-left corner of the matrix (see --orientation: mapping unverified)
-    double orientation[6] = {1, 0, 0, 0, 1, 0};              // Image Orientation (Slide): row direction cosines, then column direction cosines
+    double orientation[6] = {0, -1, 0, -1, 0, 0};              // Image Orientation (Slide): row direction cosines, then column direction cosines
     std::string study_uid, series_uid, for_uid, sop_uid, specimen_uid, dimorg_uid;
     std::string source_name, manufacturer, model, serial, software, acquisition_datetime, lossy_method;
     double source_ratio = 0, our_ratio = 0;                   // Lossy Image Compression Ratio: source (iSyntax, 0 = unknown) and this file's own
