@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // API conventions:
 // - return type is one of:
 // -- appropriate data type for simple getters. For complex getters doing work, isyntax_error_t + out variable.
@@ -157,3 +161,7 @@ isyntax_error_t libisyntax_read_macro_image(isyntax_t* isyntax, int32_t* width, 
 isyntax_error_t libisyntax_read_label_image_jpeg(isyntax_t* isyntax, uint8_t** jpeg_buffer, uint32_t* jpeg_size);
 isyntax_error_t libisyntax_read_macro_image_jpeg(isyntax_t* isyntax, uint8_t** jpeg_buffer, uint32_t* jpeg_size);
 isyntax_error_t libisyntax_read_icc_profile(isyntax_t* isyntax, isyntax_image_t* image, uint8_t** icc_profile_buffer, uint32_t* icc_profile_size);
+
+#ifdef __cplusplus
+}
+#endif
