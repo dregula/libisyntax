@@ -52,7 +52,7 @@ Findings:
 |---|---|---|---|
 | Tier-1 + 2 (same for all) | 31 | 171 | 241 |
 | STRIP (per-layer windows, shared cells): decode + transform | 2.5 + 4.9 | 12.5 + 79 | 17.6 + 130 |
-| **STRIP total (0.44 to 0.57 core-s per MB of file)** | **39 (1.00)** | **263 (1.00)** | **388 (1.00)** |
+| **STRIP total (model 0.44 to 0.57 core-s per MB of file; measured end to end later: 1.1 to 1.4, see Strip_Window_Cpp_Implementation_Claude.md and DpsBulk_Collection_Claude.md)** | **39 (1.00)** | **263 (1.00)** | **388 (1.00)** |
 | THIN + sufficient cache | 44 (1.13 x) | 346 (1.32 x) | 528 (1.36 x) |
 | THIN, no cache | 86 (2.2 x) | 669 (2.6 x) | 1006 (2.6 x) |
 | RECRUIT, no cache | 379 (9.7 x) | 3781 (14 x) | 5674 (15 x) |
@@ -61,7 +61,7 @@ Where the CPU goes (STRIP): Tier-1 about 80 % for the tissue-rich file, about 62
 
 ## 4. Fleet view for a million files **[hypothesis; arithmetic on the above]**
 
-Mean size of the 12 example files is 840 MB (a guess for the population). STRIP at about 0.5 core-s per MB gives about 420 core-s per file, **about 4.2 x 10^8 core-seconds = 117 000 core-hours** (about 5 days on 1 000 cores, 1 day on 5 000 cores). Pyramid output is about 2.3 x the input (measured on one file): about 1.9 PB for 1 M files of 840 MB; storage and write bandwidth may bind before the CPUs do.
+Mean size of the 12 example files is 840 MB (a guess for the population). STRIP at about 0.5 core-s per MB (the model; the measured transcoder costs 1.1 to 1.4, so multiply by about 2.5) gives about 420 core-s per file, **about 4.2 x 10^8 core-seconds = 117 000 core-hours** (about 5 days on 1 000 cores, 1 day on 5 000 cores). Pyramid output is about 2.3 x the input (measured on one file): about 1.9 PB for 1 M files of 840 MB; storage and write bandwidth may bind before the CPUs do.
 
 | Strategy | CPU total (x STRIP) | Bytes read per file | Notes |
 |---|---|---|---|
