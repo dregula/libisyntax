@@ -28,3 +28,12 @@ Cold reads, `dd bs=4M`, three 1.3 GB files: 85 to 92 MB/s per stream; four paral
 ## 5. Access control advice given
 
 The sandbox can read 55 top-level entries under `/mnt/Box`. To block the rest: `sandbox.filesystem.denyRead` / `allowRead` / `allowWrite` with real absolute paths, `sandbox.allowUnsandboxedCommands: false`, and `permissions.blockReadsOutsideWorkingDirectories`.
+
+## 6. Top-level batch (started by the owner, 2026-11-27 evening)
+
+Rule from the owner: read only the **top level** of `DpsBulk`; never enter a subdirectory until told otherwise. Output goes to `/mnt/d/DpsDICOM` (local disk D:, 3.9 TB, 3.7 TB free; **[verified]** write 110 MB/s, one stream, 1 GiB with fsync). The Box write path is not used.
+
+- Top level: 400 `.isyntax` files, 505.7 GB (mean 1,264 MB, max 4.56 GB), plus one `.tis` file (skipped) and 31 subdirectories (not entered). List: `c_decoder_output/dpsbulk/top_level.tsv`; order by size: `order_by_size.tsv`. Estimated output about 1.2 TB (2.3 x input); estimated time about 11 h on 16 cores.
+- Script: `tools/transcode_tests/batch_dpsbulk.sh LIST.tsv`: stages each input from Box to `c_decoder_output/dpsbulk/work/` (the next file is prefetched during the current transcode), transcodes there, copies the layers to `/mnt/d/DpsDICOM/<guid>/`, checks sizes, writes `DONE`, deletes its local copies. Restartable (skips folders with `DONE`); failures go to `c_decoder_output/dpsbulk/logs/failed.tsv`, per-file logs in `logs/<guid>.log`, progress in `c_decoder_output/dpsbulk/batch.log`. Must run in a foreground terminal (a backgrounded child of a tool shell is killed with the shell).
+- Trial (3 smallest files): 54 MB file 6 s and 57 MB file 9 s, both complete (10 layers, 88 MB output for the first). **The 25 MB file `3ef7d5ea-a6dd-4f93-a3ba-6a04f3e5bfff.isyntax` aborted: "FATAL: tile grid smaller than the coefficient array (0 0 0)"** [open]: probably a degenerate or non-WSI file; investigate after the batch (check the header with `isyntax_example FILE`).
+- Not yet done: validation of the batch output (dciodvfy / wsidicom on a sample), the final tally of failures, and the capacity plan for the other 31 subdirectories (about 18.3 TB input, 38 to 43 TB output; D: cannot hold it).
