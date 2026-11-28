@@ -244,6 +244,16 @@ static Mat pixel_frame(Engine& e, int k, int i0y, int i0x, int F) {             
     Mat fr(F, F); if (e.c == 0) std::fill(fr.v.begin(), fr.v.end(), 255);                    // outside the array: white (Y = 255, Co = Cg = 0), as the iSyntax margin filler
     if (y1 > y0 && x1 > x0) paste(fr, y0 - i0y, x0 - i0x, e.out_region(k, y0, y1, x0, x1)); return fr;
 }
+// Layer k+1 from layer k: out_{k+1}[m] = 5/3 low-pass (T.800) of out_k centred on sample 2m + 3 (cross-layer relation i = 2 i' + 3, Transcoding doc 8a), vertical then horizontal, mirrored at the ends.
+static inline int refl(int i, int N) { if (N == 1) return 0; int per = 2 * (N - 1); i = i < 0 ? -i : i; i %= per; return i > N - 1 ? per - i : i; }
+static Mat lp_down(const Mat& x) {
+    auto lp = [](auto at, int N, int m) { int i = 2 * m + 3; auto X = [&](int j) { return at(refl(j, N)); };
+        i32 dm = X(i - 1) - ((X(i - 2) + X(i)) >> 1), dp = X(i + 1) - ((X(i) + X(i + 2)) >> 1); return X(i) + ((dm + dp + 2) >> 2); };
+    int Rn = std::max(1, (x.r - 2) / 2), Cn = std::max(1, (x.c - 2) / 2); Mat t(Rn, x.c), o(Rn, Cn);
+    for (int m = 0; m < Rn; m++) for (int c = 0; c < x.c; c++) t.at(m, c) = lp([&](int j) { return x.at(j, c); }, x.r, m);
+    for (int r = 0; r < Rn; r++) for (int m = 0; m < Cn; m++) o.at(r, m) = lp([&](int j) { return t.at(r, j); }, x.c, m);
+    return o;
+}
 static Pyr const_pyramid(int F, int D, i32 v) { Pyr p; for (int j = 0; j < D; j++) { int n = F >> (j + 1); p.lv.push_back({Mat(n, n), Mat(n, n), Mat(n, n)}); } p.LL = Mat(F >> D, F >> D); std::fill(p.LL.v.begin(), p.LL.v.end(), v); return p; }
 
 // ------------------------------------------------------------------------------------------------ colour, Mallat layout
@@ -324,10 +334,10 @@ struct Pool {                                                  // persistent wor
 // ------------------------------------------------------------------------------------------------ the driver
 struct Opt {
     std::string file, csv, dumpdir; int F = 256, D = 5, h = 4, threads = 8, S = 16, prefilter = -1, verify_every = 0, layer_lo = 0, layer_hi = 99, omit_layers = 2, max_rows = 0;
-    std::string dicom_dir, icc = DEFAULT_ICC; double orient[6] = {0, -1, 0, -1, 0, 0};
+    std::string dicom_dir, icc = DEFAULT_ICC; double orient[6] = {0, -1, 0, -1, 0, 0}; double clamp_um = 0;
     bool trunc_ = true, encode = true, fastpath = true, audit = false, roundtrip = false, oob = false; std::vector<std::array<int, 3>> dumps;
 };
-struct Stat { std::atomic<long> const_omit{0}, frames{0}, interior{0}, edge{0}, fast{0}, omitted{0}, prefilter_pass{0}, encoded{0}, verified{0}, verify_bad{0}, rt_checked{0}, rt_bad{0}, audit_false_reject{0}, audit_omit{0}, fast_verified{0}, fast_bad{0}; std::atomic<long> bytes{0};
+struct Stat { std::atomic<long> const_omit{0}, white{0}, masked{0}, frames{0}, interior{0}, edge{0}, fast{0}, omitted{0}, prefilter_pass{0}, encoded{0}, verified{0}, verify_bad{0}, rt_checked{0}, rt_bad{0}, audit_false_reject{0}, audit_omit{0}, fast_verified{0}, fast_bad{0}; std::atomic<long> bytes{0};
     std::atomic<long> t_plan_ns{0}, t_decode_ns{0}, t_build_ns{0}, t_pixel_ns{0}, t_omit_ns{0}, t_encode_ns{0}, t_verify_ns{0}, t_fast_ns{0}; std::atomic<int> max_audit_abs[3] = {{0}, {0}, {0}}; };
 static void usage() { fprintf(stderr, "usage: isyntax_strip_transcode FILE [--layers a-b] [--threads N] [--colour floor|trunc] [--omit S] [--no-fastpath] [--no-encode] [--verify-every K] [--roundtrip] [--audit]\n"
     "         [--csv out.csv] [--dump k ty tx dir] [--prefilter T] [--max-rows N]\n         [--dicom OUTDIR] [--icc file.icc] [--orientation a,b,c,d,e,f]   (DICOM: one file per layer, omitted glass frames as constant-colour frames)\n"); exit(2); }
@@ -343,7 +353,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-fastpath") o.fastpath = false; else if (a == "--no-encode") o.encode = false; else if (a == "--verify-every") o.verify_every = atoi(nx());
         else if (a == "--roundtrip") o.roundtrip = true; else if (a == "--audit") o.audit = true; else if (a == "--oob") o.oob = true; else if (a == "--csv") o.csv = nx(); else if (a == "--prefilter") o.prefilter = atoi(nx());
         else if (a == "--max-rows") o.max_rows = atoi(nx());
-        else if (a == "--dicom") o.dicom_dir = nx(); else if (a == "--icc") o.icc = nx();
+        else if (a == "--origin-clamp-um") o.clamp_um = atof(nx()); else if (a == "--dicom") o.dicom_dir = nx(); else if (a == "--icc") o.icc = nx();
         else if (a == "--orientation") { if (sscanf(nx(), "%lf,%lf,%lf,%lf,%lf,%lf", o.orient, o.orient + 1, o.orient + 2, o.orient + 3, o.orient + 4, o.orient + 5) != 6) usage(); }
         else if (a == "--dump") { int k = atoi(nx()), ty = atoi(nx()), tx = atoi(nx()); o.dumpdir = nx(); o.dumps.push_back({k, ty, tx}); }
         else usage();
@@ -357,8 +367,25 @@ int main(int argc, char** argv) {
     int Wv = (int)(g.Wp - 2 * g.pad), Hv = (int)(g.Hp - 2 * g.pad);
     printf("file %s: %d levels, padded %lldx%lld, valid %dx%d (%.0f Mpx); F=%d D=%d h=%d colour=%s omit S=%d (layers 0..%d) fastpath=%d threads=%d\n", o.file.c_str(), g.L, (long long)g.Wp, (long long)g.Hp, Wv, Hv, (double)Wv * Hv / 1e6, o.F, o.D, o.h, o.trunc_ ? "trunc" : "floor", o.S, o.omit_layers - 1, o.fastpath, o.threads);
     for (int s = 0; s < g.L; s++) if (g.limR[s] > g.nbr[s] * 128 || g.limC[s] > g.nbc[s] * 128) die("tile grid smaller than the coefficient array", s);
+    std::vector<std::vector<uint8_t>> EX(g.L);
+    for (int s = 0; s < g.L; s++) { EX[s].assign((size_t)g.nbr[s] * g.nbc[s], 0); for (int ty = 0; ty < g.nbr[s]; ty++) for (int tx = 0; tx < g.nbc[s]; tx++) EX[s][(size_t)ty * g.nbc[s] + tx] = libisyntax_tile_exists(is, s, tx, ty) ? 1 : 0; }
+    auto tile_exists = [&](int s, i64 ty, i64 tx) { return !(ty < 0 || tx < 0 || ty >= g.nbr[s] || tx >= g.nbc[s]) && EX[s][(size_t)ty * g.nbc[s] + tx] != 0; };
+    auto fdiv = [](int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); };
     Window win; win.is = is; win.g = &g; Pool pool(o.threads); Stat st; std::vector<FrameRec> recs; std::mutex recmu; std::atomic<long> peak_blocks{0};
     const int F = o.F, D = o.D, h = o.h;
+    {   long n0 = 0; for (auto v : EX[0]) n0 += v != 0; printf("tiles that exist in the file at scale 0: %ld of %zu (non-existent tiles are drawn white by SlideScape and written white here)\n", n0, EX[0].size()); }
+    auto exist_state = [&](int k, int i0y, int i0x) -> int {              // 0: no iSyntax tile under the frame exists, 1: all, 2: some
+        if (k > g.top) return 1; int n = 0, ne = 0;
+        for (int ty = fdiv(i0y, 256); ty <= fdiv(i0y + F - 1, 256); ty++) for (int tx = fdiv(i0x, 256); tx <= fdiv(i0x + F - 1, 256); tx++) { n++; ne += tile_exists(k, ty, tx); }
+        return ne == 0 ? 0 : (ne == n ? 1 : 2);
+    };
+    auto masked_pixel_frame = [&](Engine& e, int c, int k, int i0y, int i0x, int Fs) {      // decoded pixels, white (Y = 255, Co = Cg = 0) outside the array and on non-existent tiles
+        Mat m = pixel_frame(e, k, i0y, i0x, Fs);
+        if (k <= g.top) for (int ty = fdiv(i0y, 256); ty <= fdiv(i0y + Fs - 1, 256); ty++) for (int tx = fdiv(i0x, 256); tx <= fdiv(i0x + Fs - 1, 256); tx++) if (!tile_exists(k, ty, tx)) {
+            int ya = std::max(ty * 256, i0y), yb = std::min(ty * 256 + 256, i0y + Fs), xa = std::max(tx * 256, i0x), xb = std::min(tx * 256 + 256, i0x + Fs);
+            for (int y = ya; y < yb; y++) for (int x = xa; x < xb; x++) m.at(y - i0y, x - i0x) = c == 0 ? 255 : 0; }
+        return m;
+    };
     std::map<int, std::shared_ptr<std::vector<uint8_t>>> ccache; std::mutex ccmu;
     auto const_codestream = [&](const i32* rgb) {                                   // a frame of one colour: RCT of (R,G,B), LL constant, all details 0 (exact for the 5/3 transform)
         int key = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
@@ -372,47 +399,129 @@ int main(int argc, char** argv) {
     // treat the layers as different pyramids. Sample i of layer k sits at 2^k (i + 3) - 2 (padded level-0 units) and the J2K alignment needs (i_base + 3) % 32 == 0, so the layer
     // origins can be put on the common grid 2^(top+5) M; the remaining spread is only the sample-centre offsets (<= 2^(top-1) units = 4 um at top = 5).
     struct Ax { int i_base = 0, tiles = 0; i64 cols = 0; };
-    std::vector<Ax> GY(g.L), GX(g.L);
-    for (int axis = 0; axis < 2; axis++) {
-        int nvalid = axis ? Wv : Hv; std::vector<i64> ilo(g.L), ihi(g.L); i64 M = -1;
-        for (int k = 0; k < g.L; k++) {
-            auto p = [&](i64 i) { return (double)((i64)1 << k) * (double)(i + 3) - 2.0; }; double half = (double)(1 << k) / 2; i64 lo = 0; while (p(lo) + half <= (double)g.pad - 0.5) lo++;
-            i64 hi = lo; while (p(hi + 1) - half < (double)(g.pad + nvalid) - 0.5) hi++; ilo[k] = lo; ihi[k] = hi;
-            i64 q = (lo + 3) / ((i64)32 << (g.top - k)); M = M < 0 ? q : std::min(M, q);
+    std::vector<Ax> GY, GX;
+    auto compute_grids = [&](int Kmax, std::vector<Ax>& GYo, std::vector<Ax>& GXo) {
+        GYo.assign(Kmax + 1, Ax()); GXo.assign(Kmax + 1, Ax());
+        for (int axis = 0; axis < 2; axis++) {
+            int nvalid = axis ? Wv : Hv; std::vector<i64> ilo(Kmax + 1), ihi(Kmax + 1); i64 M = -1;
+            for (int k = 0; k <= Kmax; k++) {
+                auto p = [&](i64 i) { return (double)((i64)1 << k) * (double)(i + 3) - 2.0; }; double half = (double)((i64)1 << k) / 2; i64 lo = 0; while (p(lo) + half <= (double)g.pad - 0.5) lo++;
+                i64 hi = lo; while (p(hi + 1) - half < (double)(g.pad + nvalid) - 0.5) hi++; ilo[k] = lo; ihi[k] = hi;
+                i64 q = (lo + 3) / ((i64)32 << (Kmax - k)); M = M < 0 ? q : std::min(M, q);
+            }
+            for (int k = 0; k <= Kmax; k++) { Ax a; a.i_base = (int)(((i64)32 << (Kmax - k)) * M - 3); a.cols = ihi[k] - a.i_base + 1; a.tiles = (int)((a.cols + F - 1) / F); (axis ? GXo : GYo)[k] = a; }
         }
-        for (int k = 0; k < g.L; k++) { Ax a; a.i_base = (int)(((i64)32 << (g.top - k)) * M - 3); a.cols = ihi[k] - a.i_base + 1; a.tiles = (int)((a.cols + F - 1) / F); (axis ? GX : GY)[k] = a; }
-    }
-    for (int k = std::max(0, o.layer_lo); k <= std::min(g.top, o.layer_hi); k++) {
+    };
+    // DICOM-WSI wants layers until the whole image fits one tile: K = first layer whose matrix is <= F x F (the number of layers therefore varies with the slide)
+    int K = 0; for (; K < 30; K++) { compute_grids(K, GY, GX); if (GY[K].cols <= F && GX[K].cols <= F) break; } if (K >= 30) die("no single-tile layer found");
+    printf("pyramid layers 0..%d (iSyntax stores scales 0..%d%s)\n", K, g.top, K > g.top ? "; the layers above are derived by the 5/3 low-pass" : "");
+    const double mpp_um = (libisyntax_get_is_mpp_known(is) && libisyntax_get_mpp_x(is) > 0) ? libisyntax_get_mpp_x(is) : 0.25, unit_mm = mpp_um / 1000.0;
+    if (std::fabs(mpp_um - 0.25) > 0.01) printf("NOTE: pixel spacing %.4f um is not the usual 40x 0.25 um\n", mpp_um);
+    auto finish_layer = [&](int k, FILE* spool, const std::string& spool_path, std::vector<uint64_t>& offs, std::vector<uint64_t>& lens, long cs_total, int tix, int tiy, i64 mcx, i64 mcy, int ibx, int iby) {
+        fclose(spool);
+        LayerMeta m; m.layer = k; m.rows = m.cols = F; m.frames_x = tix; m.frames_y = tiy; m.matrix_cols = (long)mcx; m.matrix_rows = (long)mcy; m.spacing_mm = unit_mm * (double)((i64)1 << k); m.resampled = k > 0;
+        double ox = libisyntax_image_get_offset_x(wsi), oy = libisyntax_image_get_offset_y(wsi);            // level-0 units (scale factor of the file); sample i of layer k is centred at ox + 2^k (i + 3) - 2
+        auto corner = [&](int kk, int ib_x, int ib_y, double& cx, double& cy) { double pxl = (double)((i64)1 << kk); cx = (ox + pxl * (ib_x + 3) - 2.0 - pxl / 2) * unit_mm; cy = (oy + pxl * (ib_y + 3) - 2.0 - pxl / 2) * unit_mm; };
+        double Bx, By, B0x, B0y; corner(k, ibx, iby, Bx, By); corner(0, GX[0].i_base, GY[0].i_base, B0x, B0y);
+        if (o.clamp_um > 0) { double c = o.clamp_um / 1000.0; Bx = B0x + std::max(-c, std::min(c, Bx - B0x)); By = B0y + std::max(-c, std::min(c, By - B0y)); }      // optional: keep layer origins within a viewer's tolerance (wsidicom: 0.01 mm)
+        // Placeholder mapping (owner confirmed the default orientation looks the same in SlideScape and OmniHisto): slide position of pixel (r, c) = (X0 + o0 c s + o3 r s, Y0 + o1 c s + o4 r s);
+        // X0, Y0 put the layer-0 matrix in the lower-left of its slide bounding box.
+        double W0 = (double)GX[0].cols * unit_mm, H0 = (double)GY[0].cols * unit_mm; const double* oo = o.orient;
+        double minx = std::min(0.0, oo[0] * W0) + std::min(0.0, oo[3] * H0), miny = std::min(0.0, oo[1] * W0) + std::min(0.0, oo[4] * H0);
+        m.origin_x_mm = Bx - minx; m.origin_y_mm = By - miny; for (int q = 0; q < 6; q++) m.orientation[q] = o.orient[q];
+        std::string base = o.file; size_t sl = base.find_last_of("/\\"); if (sl != std::string::npos) base = base.substr(sl + 1); size_t dt = base.rfind('.'); if (dt != std::string::npos) base = base.substr(0, dt);
+        m.source_name = base; m.study_uid = make_uid(base, "study"); m.series_uid = make_uid(base, "series"); m.for_uid = make_uid(base, "frame-of-reference"); m.specimen_uid = make_uid(base, "specimen"); m.dimorg_uid = make_uid(base, "dimorg");
+        m.sop_uid = make_uid(base, "sop-layer-" + std::to_string(k));
+        auto sv = [](const char* v, const char* d) { return std::string(v && *v ? v : d); };
+        m.manufacturer = sv(libisyntax_get_manufacturer(is), "UNKNOWN"); m.model = sv(libisyntax_get_manufacturers_model_name(is), "UNKNOWN"); m.serial = sv(libisyntax_get_device_serial_number(is), "UNKNOWN");
+        m.software = "libisyntax strip transcoder (fork) 0.1"; m.acquisition_datetime = sv(libisyntax_get_acquisition_datetime(is), ""); m.lossy_method = sv(libisyntax_get_lossy_image_compression_method(is), "");
+        m.source_ratio = libisyntax_get_lossy_image_compression_ratio(is); m.our_ratio = (double)m.matrix_cols * m.matrix_rows * 3 / std::max<long>(1, cs_total); m.icc_path = o.icc;
+        std::string outp = o.dicom_dir + "/" + base + "_L" + std::to_string(k) + ".dcm", err;
+        if (!write_layer_file(m, outp, spool_path, offs, lens, err)) die(("DICOM write failed: " + err).c_str());
+        remove(spool_path.c_str()); printf("  wrote %s (%zu frames, %.1f MB of codestreams)\n", outp.c_str(), offs.size(), cs_total / 1e6); fflush(stdout);
+    };
+    auto spool_row = [&](FILE* spool, std::vector<FrameRec>& local, std::vector<uint64_t>& offs, std::vector<uint64_t>& lens, uint64_t& spool_pos, long& cs_total) {     // frames of one row, in order, as encapsulated items
+        for (size_t t2 = 0; t2 < local.size(); t2++) {
+            FrameRec& r = local[t2]; if (!r.cs) die("frame without codestream", r.k, r.ty, (long)t2); uint32_t len = (uint32_t)((r.cs->size() + 1) & ~(size_t)1);
+            unsigned char hdr[8] = {0xFE, 0xFF, 0x00, 0xE0, (unsigned char)(len & 255), (unsigned char)((len >> 8) & 255), (unsigned char)((len >> 16) & 255), (unsigned char)(len >> 24)};
+            fwrite(hdr, 1, 8, spool); fwrite(r.cs->data(), 1, r.cs->size(), spool); if (r.cs->size() & 1) fputc(0, spool);
+            offs.push_back(spool_pos); lens.push_back(len); spool_pos += 8 + len; cs_total += (long)r.cs->size(); }
+    };
+    auto ensure_blocks = [&](const std::set<u64>& need_set) {                  // keep exactly these blocks; decode the missing ones in parallel
+        double t = now();
+        for (auto it = win.m.begin(); it != win.m.end();) { if (!need_set.count(it->first)) it = win.m.erase(it); else ++it; }
+        std::vector<u64> missing; for (u64 key : need_set) { int by = (int)(key & ((1u << 27) - 1)), bx = (int)((key >> 27) & ((1u << 27) - 1)), s2 = (int)(key >> 56);
+            if (bx < g.nbc[s2] && by < g.nbr[s2] && !win.m.count(key)) { missing.push_back(key); win.m[key] = std::make_unique<Blk>(); } }
+        pool.run((int)missing.size(), [&](int i, int) { u64 key = missing[i]; int by = (int)(key & ((1u << 27) - 1)), bx = (int)((key >> 27) & ((1u << 27) - 1)), kind = (int)((key >> 54) & 3), s2 = (int)(key >> 56);
+            Blk* b = win.m[key].get(); int32_t z = 0;
+            if (libisyntax_tile_read_coefficients(is, s2, bx, by, kind ? LIBISYNTAX_COEFFICIENTS_H : LIBISYNTAX_COEFFICIENTS_LL, b->d, &z) != LIBISYNTAX_OK) die("block decode failed", s2, bx, by);
+            b->zero = z != 0; });
+        win.decodes += (long)missing.size(); win.peak = std::max(win.peak, win.m.size()); st.t_decode_ns += (long)((now() - t) * 1e9);
+    };
+    Mat plane[3]; int plane_layer = -1;                                          // pixel plane of the last derived layer
+    for (int k = std::max(0, o.layer_lo); k <= std::min(K, o.layer_hi); k++) {
         int iby = GY[k].i_base, tiy = GY[k].tiles, ibx = GX[k].i_base, tix = GX[k].tiles; i64 mcy = GY[k].cols, mcx = GX[k].cols;
+        if (k > g.top) {                                                       // ---- layers above the top stored scale: 5/3 low-pass of the layer below, whole plane in memory (small)
+            if (plane_layer != k - 1) {
+                if (k - 1 != g.top) die("derived plane chain broken", k);
+                int Rt = 2 * g.R(g.top), Ct = 2 * g.C(g.top);
+                { Plan pl; plan_pixel_frame(g, pl, g.top, 0, 0, std::max(Rt, Ct)); ensure_blocks(std::set<u64>(pl.blocks.begin(), pl.blocks.end())); }
+                Mat tp[3]; for (int c = 0; c < 3; c++) { Engine e(win, c); tp[c] = e.out_region(g.top, 0, Rt, 0, Ct); }
+                if (o.verify_every && g.top >= 1) {                              // check: LP of layer top-1 reproduces the stored/decoded layer top in the interior
+                    int Rp = 2 * g.R(g.top - 1), Cp = 2 * g.C(g.top - 1); Plan p2; plan_pixel_frame(g, p2, g.top - 1, 0, 0, std::max(Rp, Cp)); ensure_blocks(std::set<u64>(p2.blocks.begin(), p2.blocks.end()));
+                    long bad = 0, tot = 0; for (int c = 0; c < 3; c++) { Engine e(win, c); Mat lp = lp_down(e.out_region(g.top - 1, 0, Rp, 0, Cp));
+                        for (int y = 8; y < std::min(lp.r, tp[c].r) - 8; y++) for (int x = 8; x < std::min(lp.c, tp[c].c) - 8; x++) { tot++; bad += lp.at(y, x) != tp[c].at(y, x); } }
+                    printf("  LP check layer %d -> %d (interior): %ld of %ld samples differ\n", g.top - 1, g.top, bad, tot); }
+                for (int c = 0; c < 3; c++) for (int ty = 0; ty * 256 < Rt; ty++) for (int tx = 0; tx * 256 < Ct; tx++) if (!tile_exists(g.top, ty, tx))
+                    for (int y = ty * 256; y < std::min(Rt, ty * 256 + 256); y++) for (int x = tx * 256; x < std::min(Ct, tx * 256 + 256); x++) tp[c].at(y, x) = c == 0 ? 255 : 0;
+                for (int c = 0; c < 3; c++) plane[c] = tp[c];
+                plane_layer = g.top; win.m.clear();
+            }
+            for (int c = 0; c < 3; c++) plane[c] = lp_down(plane[c]);
+            plane_layer = k; int Rk = plane[0].r, Ck = plane[0].c;
+            printf("layer %d (derived): plane %d x %d, %d x %d frames (origin %d,%d)\n", k, Ck, Rk, tix, tiy, ibx, iby); fflush(stdout);
+            FILE* spool = nullptr; std::string spool_path; std::vector<uint64_t> offs, lens; uint64_t spool_pos = 0; long cs_total = 0;
+            if (!o.dicom_dir.empty()) { spool_path = o.dicom_dir + "/.spool_L" + std::to_string(k) + ".tmp"; spool = fopen(spool_path.c_str(), "wb"); if (!spool) die("cannot create spool"); }
+            for (int ty = 0; ty < tiy; ty++) {
+                std::vector<FrameRec> local(tix);
+                pool.run(tix, [&](int tx, int) {
+                    int i0y = iby + ty * F, i0x = ibx + tx * F; FrameRec fr{k, ty, tx, i0y, i0x, 'D', 'D', 0, 0, -1}; st.frames++;
+                    int y0 = std::max(i0y, 0), x0 = std::max(i0x, 0), y1 = std::min(i0y + F, Rk), x1 = std::min(i0x + F, Ck);
+                    if (y1 <= y0 || x1 <= x0) { i32 w[3] = {255, 255, 255}; fr.cs = const_codestream(w); st.white++; }
+                    else {
+                        Pyr py[3]; for (int c = 0; c < 3; c++) { Mat pix(F, F); if (c == 0) std::fill(pix.v.begin(), pix.v.end(), 255);
+                            for (int y = y0; y < y1; y++) memcpy(&pix.v[(size_t)(y - i0y) * F + (x0 - i0x)], &plane[c].v[(size_t)y * Ck + x0], (size_t)(x1 - x0) * 4); py[c] = full_pyramid(pix, D); }
+                        colour_convert(py[0], py[1], py[2], o.trunc_); std::vector<i32> coef((size_t)F * F * 3); for (int c = 0; c < 3; c++) mallat(py[c], F, D, &coef[(size_t)c * F * F]);
+                        auto cs = std::make_shared<std::vector<uint8_t>>(); if (!encode_frame(coef.data(), F, *cs)) die("encode failed", k, ty, tx); fr.cs = cs; st.encoded++; }
+                    fr.bytes = (long)fr.cs->size(); st.bytes += fr.bytes; local[tx] = fr; });
+                if (spool) spool_row(spool, local, offs, lens, spool_pos, cs_total);
+                for (auto& r : local) { r.cs.reset(); recs.push_back(r); }
+            }
+            if (spool) finish_layer(k, spool, spool_path, offs, lens, cs_total, tix, tiy, mcx, mcy, ibx, iby);
+            continue;
+        }
         int R = 2 * g.R(k), C = 2 * g.C(k);
         printf("layer %d: %d x %d frames (origin %d,%d)\n", k, tix, tiy, ibx, iby); fflush(stdout);
         FILE* spool = nullptr; std::string spool_path; std::vector<uint64_t> offs, lens; uint64_t spool_pos = 0; long cs_total = 0;
         if (!o.dicom_dir.empty()) { if (!o.encode) die("--dicom needs encoding"); spool_path = o.dicom_dir + "/.spool_L" + std::to_string(k) + ".tmp"; spool = fopen(spool_path.c_str(), "wb"); if (!spool) die("cannot create spool in --dicom directory"); }
-        struct FP { int ty, tx, i0y, i0x; bool edge; Plan plan; };
+        struct FP { int ty, tx, i0y, i0x; bool edge; int state = 1; Plan plan; };
         auto plan_row = [&](int ty, std::vector<FP>& row) {
             row.assign(tix, FP()); double t = now();
             pool.run(tix, [&](int tx, int) { FP& f = row[tx]; f.ty = ty; f.tx = tx; f.i0y = iby + ty * F; f.i0x = ibx + tx * F;
                 f.edge = !(f.i0y >= 8 && f.i0x >= 8 && f.i0y + F <= R - 8 && f.i0x + F <= C - 8);
-                if (f.edge) plan_pixel_frame(g, f.plan, k, f.i0y, f.i0x, F); else plan_interior_frame(g, f.plan, k, f.i0y, f.i0x, F, D, h); });
+                f.state = exist_state(k, f.i0y, f.i0x); if (f.state == 2) f.edge = true;                // frames partly over non-existent tiles use the pixel path with a white mask
+                if (f.state == 0) { /* wholly over non-existent tiles: white, nothing to decode */ }
+                else if (f.edge) plan_pixel_frame(g, f.plan, k, f.i0y, f.i0x, F); else plan_interior_frame(g, f.plan, k, f.i0y, f.i0x, F, D, h); });
             st.t_plan_ns += (long)((now() - t) * 1e9);
         };
-        auto ensure = [&](const std::vector<FP>& row) {                          // keep exactly the blocks of this row; decode the missing ones
-            std::set<u64> need_set; for (auto& f : row) need_set.insert(f.plan.blocks.begin(), f.plan.blocks.end());
-            double t = now();
-            for (auto it = win.m.begin(); it != win.m.end();) { if (!need_set.count(it->first)) it = win.m.erase(it); else ++it; }
-            std::vector<u64> missing; for (u64 key : need_set) { int by = (int)(key & ((1u << 27) - 1)), bx = (int)((key >> 27) & ((1u << 27) - 1)), kind = (int)((key >> 54) & 3), s = (int)(key >> 56);
-                if (bx < g.nbc[s] && by < g.nbr[s] && !win.m.count(key)) { missing.push_back(key); win.m[key] = std::make_unique<Blk>(); } }
-            pool.run((int)missing.size(), [&](int i, int) { u64 key = missing[i]; int by = (int)(key & ((1u << 27) - 1)), bx = (int)((key >> 27) & ((1u << 27) - 1)), kind = (int)((key >> 54) & 3), s = (int)(key >> 56);
-                Blk* b = win.m[key].get(); int32_t z = 0;                           // map is not modified during the parallel phase
-                if (libisyntax_tile_read_coefficients(is, s, bx, by, kind ? LIBISYNTAX_COEFFICIENTS_H : LIBISYNTAX_COEFFICIENTS_LL, b->d, &z) != LIBISYNTAX_OK) die("block decode failed", s, bx, by);
-                b->zero = z != 0; });
-            win.decodes += (long)missing.size(); win.peak = std::max(win.peak, win.m.size()); st.t_decode_ns += (long)((now() - t) * 1e9);
-        };
+        auto ensure = [&](const std::vector<FP>& row) { std::set<u64> ns; for (auto& f : row) ns.insert(f.plan.blocks.begin(), f.plan.blocks.end()); ensure_blocks(ns); };
         std::vector<FP> cur, nxt; int rows = o.max_rows ? std::min(tiy, o.max_rows) : tiy; plan_row(0, cur); ensure(cur);
         for (int ty = 0; ty < rows; ty++) {
             std::vector<FrameRec> local(tix);
             pool.run(tix, [&](int tx, int) {
                 FP& f = cur[tx]; FrameRec fr{k, ty, tx, f.i0y, f.i0x, f.edge ? 'E' : 'I', 'G', 0, 0, -1}; st.frames++; (f.edge ? st.edge : st.interior)++;
+                if (f.state == 0) { i32 w[3] = {255, 255, 255}; fr.path = 'W'; st.white++; if (o.encode) { fr.cs = const_codestream(w); fr.bytes = (long)fr.cs->size(); st.bytes += fr.bytes; } local[tx] = fr; return; }
+                if (f.state == 2) st.masked++;
                 Engine eng[3] = {Engine(win, 0), Engine(win, 1), Engine(win, 2)}; Pyr py[3]; bool have_py = false; bool omit = false; i32 ocol[3] = {255, 255, 255};
                 double ta = now(); bool is_dump = false; for (auto& d : o.dumps) if (d[0] == k && d[1] == ty && d[2] == tx) is_dump = true;
                 i32 cvv[3] = {0, 0, 0};
@@ -434,7 +543,7 @@ int main(int argc, char** argv) {
                     candidate = mx[0] <= o.prefilter && mx[1] <= o.prefilter && mx[2] <= o.prefilter; if (candidate) st.prefilter_pass++;
                     if (o.audit && !candidate) { /* exact check below for the audit */ }
                     if (candidate || o.audit) {
-                        double tb = now(); for (int c = 0; c < 3; c++) pix[c] = pixel_frame(eng[c], k, f.i0y, f.i0x, F); have_pix = true;
+                        double tb = now(); for (int c = 0; c < 3; c++) pix[c] = masked_pixel_frame(eng[c], c, k, f.i0y, f.i0x, F); have_pix = true;
                         int lo[3] = {1 << 30, 1 << 30, 1 << 30}, hi[3] = {-(1 << 30), -(1 << 30), -(1 << 30)}; long sm[3] = {0, 0, 0};
                         for (size_t i = 0; i < pix[0].v.size(); i++) { i32 Y = pix[0].v[i], Co = pix[1].v[i], Cg = pix[2].v[i]; i32 t = Y - qhalf(Cg, true), G = t + Cg, B = t - qhalf(Co, true), Rr = B + Co;
                             i32 rgbv[3] = {std::min(255, std::max(0, Rr)), std::min(255, std::max(0, G)), std::min(255, std::max(0, B))}; for (int q = 0; q < 3; q++) { lo[q] = std::min(lo[q], rgbv[q]); hi[q] = std::max(hi[q], rgbv[q]); sm[q] += rgbv[q]; } }
@@ -452,12 +561,12 @@ int main(int argc, char** argv) {
                 }
                 if (!have_py && f.edge && f.plan.blocks.empty()) { for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, c == 0 ? 255 : 0); have_py = true; fr.path = 'F'; st.fast++; }   // padding frame: white
                 if (!have_py) {
-                    if (f.edge || have_pix) { double tp = now(); if (!have_pix) for (int c = 0; c < 3; c++) pix[c] = pixel_frame(eng[c], k, f.i0y, f.i0x, F); for (int c = 0; c < 3; c++) py[c] = full_pyramid(pix[c], D); fr.path = 'P'; st.t_pixel_ns += (long)((now() - tp) * 1e9); }
+                    if (f.edge || have_pix) { double tp = now(); if (!have_pix) for (int c = 0; c < 3; c++) pix[c] = masked_pixel_frame(eng[c], c, k, f.i0y, f.i0x, F); for (int c = 0; c < 3; c++) py[c] = full_pyramid(pix[c], D); fr.path = 'P'; st.t_pixel_ns += (long)((now() - tp) * 1e9); }
                     else { double tb2 = now(); for (int c = 0; c < 3; c++) py[c] = build_frame(eng[c], k, f.i0y, f.i0x, F, D, h); st.t_build_ns += (long)((now() - tb2) * 1e9); }
                     have_py = true;
                 }
                 if (o.verify_every && fr.path == 'G' && ((long)(st.interior) % o.verify_every == 0)) {       // exactness: builder == full forward transform of the decoded pixels
-                    double tv = now(); bool bad = false; for (int c = 0; c < 3; c++) { Mat px = have_pix ? pix[c] : pixel_frame(eng[c], k, f.i0y, f.i0x, F); if (!same(full_pyramid(px, D), py[c])) bad = true; }
+                    double tv = now(); bool bad = false; for (int c = 0; c < 3; c++) { Mat px = have_pix ? pix[c] : masked_pixel_frame(eng[c], c, k, f.i0y, f.i0x, F); if (!same(full_pyramid(px, D), py[c])) bad = true; }
                     st.verified++; if (bad) st.verify_bad++; st.t_verify_ns += (long)((now() - tv) * 1e9);
                 }
                 colour_convert(py[0], py[1], py[2], o.trunc_);
@@ -476,42 +585,20 @@ int main(int argc, char** argv) {
                         if (bad) st.rt_bad++; } }
                 local[tx] = fr; (void)ta;
             });
-            if (spool) for (int t2 = 0; t2 < tix; t2++) {                                     // frames of the row, in order, as encapsulated items
-                FrameRec& r = local[t2]; if (!r.cs) die("frame without codestream", k, ty, t2); uint32_t len = (uint32_t)((r.cs->size() + 1) & ~(size_t)1);
-                unsigned char hdr[8] = {0xFE, 0xFF, 0x00, 0xE0, (unsigned char)(len & 255), (unsigned char)((len >> 8) & 255), (unsigned char)((len >> 16) & 255), (unsigned char)(len >> 24)};
-                fwrite(hdr, 1, 8, spool); fwrite(r.cs->data(), 1, r.cs->size(), spool); if (r.cs->size() & 1) fputc(0, spool);
-                offs.push_back(spool_pos); lens.push_back(len); spool_pos += 8 + len; cs_total += (long)r.cs->size(); }
+            if (spool) spool_row(spool, local, offs, lens, spool_pos, cs_total);
             for (auto& r : local) r.cs.reset();
             { std::lock_guard<std::mutex> lk(recmu); for (auto& r : local) recs.push_back(r); }
             if (ty + 1 < rows) { plan_row(ty + 1, nxt); ensure(nxt); cur.swap(nxt); }
             if (ty % 50 == 49 || ty + 1 == rows) { printf("  layer %d row %d/%d: %.0fs, window %zu blocks (%.0f MB), decodes %ld, frames %ld, bytes %.1f MB\n", k, ty + 1, rows, now() - t0, win.m.size(), win.m.size() * sizeof(Blk) / 1e6, win.decodes.load(), st.frames.load(), st.bytes.load() / 1e6); fflush(stdout); }
         }
-        if (spool) {
-            fclose(spool); if (rows != tiy) die("--dicom needs all frame rows (no --max-rows)");
-            LayerMeta m; m.layer = k; m.rows = m.cols = F; m.frames_x = tix; m.frames_y = tiy; m.matrix_cols = (long)mcx; m.matrix_rows = (long)mcy; m.spacing_mm = 0.00025 * (double)(1 << k); m.resampled = k > 0;
-            double ox = libisyntax_image_get_offset_x(wsi), oy = libisyntax_image_get_offset_y(wsi), pxl = (double)(1 << k);            // level-0 units of 0.25 um; sample i is centred at ox + 2^k (i + 3) - 2
-            // Placeholder mapping (owner will establish SlideScape's orientation): slide position of pixel (r, c) = (X0 + dr_x r s + dc_x c s, Y0 + dr_y r s + dc_y c s) with the row direction (a,b) = (c increasing)
-            // and the column direction (cx,cy) = (r increasing); X0, Y0 are chosen so that the layer-0 matrix starts at the iSyntax corner (ox, oy) in the lower-left of its slide bounding box.
-            double Bx = (ox + pxl * (ibx + 3) - 2.0 - pxl / 2) * 0.00025, By = (oy + pxl * (iby + 3) - 2.0 - pxl / 2) * 0.00025, W0 = (double)GX[0].cols * 0.00025, H0 = (double)GY[0].cols * 0.00025;
-            const double* oo = o.orient; double minx = std::min(0.0, oo[0] * W0) + std::min(0.0, oo[3] * H0), miny = std::min(0.0, oo[1] * W0) + std::min(0.0, oo[4] * H0);
-            m.origin_x_mm = Bx - minx; m.origin_y_mm = By - miny; for (int q = 0; q < 6; q++) m.orientation[q] = o.orient[q];
-            std::string base = o.file; size_t sl = base.find_last_of("/\\"); if (sl != std::string::npos) base = base.substr(sl + 1); size_t dt = base.rfind('.'); if (dt != std::string::npos) base = base.substr(0, dt);
-            m.source_name = base; m.study_uid = make_uid(base, "study"); m.series_uid = make_uid(base, "series"); m.for_uid = make_uid(base, "frame-of-reference"); m.specimen_uid = make_uid(base, "specimen"); m.dimorg_uid = make_uid(base, "dimorg");
-            m.sop_uid = make_uid(base, "sop-layer-" + std::to_string(k));
-            auto sv = [](const char* v, const char* d) { return std::string(v && *v ? v : d); };
-            m.manufacturer = sv(libisyntax_get_manufacturer(is), "UNKNOWN"); m.model = sv(libisyntax_get_manufacturers_model_name(is), "UNKNOWN"); m.serial = sv(libisyntax_get_device_serial_number(is), "UNKNOWN");
-            m.software = "libisyntax strip transcoder (fork) 0.1"; m.acquisition_datetime = sv(libisyntax_get_acquisition_datetime(is), ""); m.lossy_method = sv(libisyntax_get_lossy_image_compression_method(is), "");
-            m.source_ratio = libisyntax_get_lossy_image_compression_ratio(is); m.our_ratio = (double)m.matrix_cols * m.matrix_rows * 3 / std::max<long>(1, cs_total); m.icc_path = o.icc;
-            std::string outp = o.dicom_dir + "/" + base + "_L" + std::to_string(k) + ".dcm", err;
-            if (!write_layer_file(m, outp, spool_path, offs, lens, err)) die(("DICOM write failed: " + err).c_str());
-            remove(spool_path.c_str()); printf("  wrote %s (%zu frames, %.1f MB of codestreams)\n", outp.c_str(), offs.size(), cs_total / 1e6); fflush(stdout);
-        }
+        if (spool) { if (rows != tiy) die("--dicom needs all frame rows (no --max-rows)"); finish_layer(k, spool, spool_path, offs, lens, cs_total, tix, tiy, mcx, mcy, ibx, iby); }
         win.m.clear();
     }
     double tt = now() - t0;
     long rss_kb = 0; { FILE* f = fopen("/proc/self/status", "r"); char line[256]; while (f && fgets(line, sizeof line, f)) if (!strncmp(line, "VmHWM:", 6)) rss_kb = atol(line + 6); if (f) fclose(f); }
     printf("\nSUMMARY %s (%s, %d threads)\n", o.file.c_str(), o.trunc_ ? "trunc" : "floor", o.threads);
     printf("  frames %ld (interior %ld, edge %ld): fast-path constant %ld (+%ld omitted without a pixel decode), omitted %ld (prefilter passed %ld), encoded %ld, coded bytes %.2f MB\n", st.frames.load(), st.interior.load(), st.edge.load(), st.fast.load(), st.const_omit.load(), st.omitted.load(), st.prefilter_pass.load(), st.encoded.load(), st.bytes.load() / 1e6);
+    printf("  frames over non-existent iSyntax tiles written white: %ld; frames partly over them (pixel path with white mask): %ld\n", st.white.load(), st.masked.load());
     printf("  block decodes (blocks, 3 colours each): %ld, peak window %zu blocks (%.0f MB), process peak RSS %.2f GB\n", win.decodes.load(), win.peak, win.peak * sizeof(Blk) / 1e6, rss_kb / 1e6);
     printf("  exactness: builder vs full forward transform of decoded pixels: %ld frames checked, %ld mismatches; fast-path vs builder: %ld checked, %ld mismatches; Tier-1 round trip: %ld checked, %ld bad\n", st.verified.load(), st.verify_bad.load(), st.fast_verified.load(), st.fast_bad.load(), st.rt_checked.load(), st.rt_bad.load());
     if (o.audit) printf("  omission audit (all layer-0/1 interior frames exact-tested): %ld omittable, %ld of them rejected by the prefilter (T=%d); max |H| seen in omittable frames per colour: %d %d %d\n", st.audit_omit.load(), st.audit_false_reject.load(), o.prefilter, st.max_audit_abs[0].load(), st.max_audit_abs[1].load(), st.max_audit_abs[2].load());

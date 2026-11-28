@@ -123,6 +123,14 @@ int32_t libisyntax_get_tile_width(const isyntax_t* isyntax) {
     return isyntax->tile_width;
 }
 
+int32_t libisyntax_tile_exists(const isyntax_t* isyntax, int32_t level, int64_t tile_x, int64_t tile_y) {
+    const isyntax_image_t* wsi = &isyntax->images[isyntax->wsi_image_index];
+    if (level < 0 || level > wsi->max_scale) return 0;
+    const isyntax_level_t* lvl = &wsi->levels[level];
+    if (tile_x < 0 || tile_y < 0 || tile_x >= lvl->width_in_tiles || tile_y >= lvl->height_in_tiles) return 0;
+    return lvl->tiles[(size_t)lvl->width_in_tiles * tile_y + tile_x].exists ? 1 : 0;
+}
+
 int32_t libisyntax_get_block_width(const isyntax_t* isyntax) {
     return isyntax->block_width;
 }

@@ -147,6 +147,8 @@ enum libisyntax_coefficient_kind_t {
   LIBISYNTAX_COEFFICIENTS_H = 1,
   LIBISYNTAX_COEFFICIENTS_LL = 2,
 };
+// 1 if the tile has codeblocks in the file (iSyntax draws non-existent tiles as white), 0 otherwise or out of range.
+int32_t         libisyntax_tile_exists(const isyntax_t* isyntax, int32_t level, int64_t tile_x, int64_t tile_y);
 int32_t         libisyntax_get_block_width(const isyntax_t* isyntax);
 int32_t         libisyntax_get_block_height(const isyntax_t* isyntax);
 isyntax_error_t libisyntax_thread_init(void);
