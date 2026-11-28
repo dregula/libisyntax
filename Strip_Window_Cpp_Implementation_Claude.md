@@ -89,3 +89,8 @@ Logs of all runs: `$SOURCEROOT/c_decoder_output/strip_analysis/<file>/cpp_*.log`
 
 Results: `1.isyntax` 8 files, 168 MB, 9.9 s; `5.isyntax` 10 files, 907 MB, 44 s (wall, 16 threads), 0 mismatches in the sampled exactness and Tier-1 round-trip checks; dciodvfy clean (apart from the known lossy-method warning). Review copies: `C:\Users\Public\iSyntax_review\dicom_1v2` and `dicom_5v2`.
 
+## 9. Open issues kept open on the owner's instruction (2026-11-27)
+
+1. **Colour of non-scanned regions (white or black) [open].** Default is white (SlideScape's display). QuPath draws the area outside the image black with its default viewer theme, which may be intentional; the owner will ask other QuPath users. Switch without code changes: `--empty-tile-colour white|black` (default white) sets the fill for non-existent tiles, padding outside the decoded array and frames wholly outside it (verified: black gives (0,0,0) padding). Note that the matrix padding at the top and left (about 190 px at layer 0 and more for deeper pyramids) and the non-existent interior tiles use the same colour.
+2. **Origin clamp for viewers with an origin tolerance (`--origin-clamp-um`) [on hold]** until other reviewers are available; off by default.
+

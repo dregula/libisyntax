@@ -39,6 +39,7 @@
 
 typedef int32_t i32; typedef int16_t i16; typedef int64_t i64; typedef uint64_t u64;
 [[noreturn]] static void die(const char* m, long a = 0, long b = 0, long c = 0) { fprintf(stderr, "FATAL: %s (%ld %ld %ld)\n", m, a, b, c); fflush(stderr); abort(); }
+static int g_empty = 255;                                   // grey level of empty (non-scanned / non-existent) regions: 255 white (default, as SlideScape), 0 black (--empty-tile-colour black); Y = g_empty, Co = Cg = 0
 static double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 // ------------------------------------------------------------------------------------------------ matrices and lifting
@@ -241,7 +242,7 @@ static Pyr build_frame(Engine& e, int k, int i0y, int i0x, int F, int D, int h) 
 }
 static Mat pixel_frame(Engine& e, int k, int i0y, int i0x, int F) {                    // frame_from_decode(): decoded part, zero filler outside the array
     int R = 2 * e.g.R(k), C = 2 * e.g.C(k), y0 = std::max(i0y, 0), x0 = std::max(i0x, 0), y1 = std::min(i0y + F, R), x1 = std::min(i0x + F, C);
-    Mat fr(F, F); if (e.c == 0) std::fill(fr.v.begin(), fr.v.end(), 255);                    // outside the array: white (Y = 255, Co = Cg = 0), as the iSyntax margin filler
+    Mat fr(F, F); if (e.c == 0) std::fill(fr.v.begin(), fr.v.end(), g_empty);                    // outside the array: white (Y = 255, Co = Cg = 0), as the iSyntax margin filler
     if (y1 > y0 && x1 > x0) paste(fr, y0 - i0y, x0 - i0x, e.out_region(k, y0, y1, x0, x1)); return fr;
 }
 // Layer k+1 from layer k: out_{k+1}[m] = 5/3 low-pass (T.800) of out_k centred on sample 2m + 3 (cross-layer relation i = 2 i' + 3, Transcoding doc 8a), vertical then horizontal, mirrored at the ends.
@@ -340,7 +341,7 @@ struct Opt {
 struct Stat { std::atomic<long> const_omit{0}, white{0}, masked{0}, frames{0}, interior{0}, edge{0}, fast{0}, omitted{0}, prefilter_pass{0}, encoded{0}, verified{0}, verify_bad{0}, rt_checked{0}, rt_bad{0}, audit_false_reject{0}, audit_omit{0}, fast_verified{0}, fast_bad{0}; std::atomic<long> bytes{0};
     std::atomic<long> t_plan_ns{0}, t_decode_ns{0}, t_build_ns{0}, t_pixel_ns{0}, t_omit_ns{0}, t_encode_ns{0}, t_verify_ns{0}, t_fast_ns{0}; std::atomic<int> max_audit_abs[3] = {{0}, {0}, {0}}; };
 static void usage() { fprintf(stderr, "usage: isyntax_strip_transcode FILE [--layers a-b] [--threads N] [--colour floor|trunc] [--omit S] [--no-fastpath] [--no-encode] [--verify-every K] [--roundtrip] [--audit]\n"
-    "         [--csv out.csv] [--dump k ty tx dir] [--prefilter T] [--max-rows N]\n         [--dicom OUTDIR] [--icc file.icc] [--orientation a,b,c,d,e,f]   (DICOM: one file per layer, omitted glass frames as constant-colour frames)\n"); exit(2); }
+    "         [--csv out.csv] [--dump k ty tx dir] [--prefilter T] [--max-rows N]\n         [--empty-tile-colour white|black] [--dicom OUTDIR] [--icc file.icc] [--orientation a,b,c,d,e,f]   (DICOM: one file per layer, omitted glass frames as constant-colour frames)\n"); exit(2); }
 struct FrameRec { int k, ty, tx, i0y, i0x; char kind, path; int omitted; long bytes; long oob; std::shared_ptr<std::vector<uint8_t>> cs; };
 
 int main(int argc, char** argv) {
@@ -353,7 +354,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-fastpath") o.fastpath = false; else if (a == "--no-encode") o.encode = false; else if (a == "--verify-every") o.verify_every = atoi(nx());
         else if (a == "--roundtrip") o.roundtrip = true; else if (a == "--audit") o.audit = true; else if (a == "--oob") o.oob = true; else if (a == "--csv") o.csv = nx(); else if (a == "--prefilter") o.prefilter = atoi(nx());
         else if (a == "--max-rows") o.max_rows = atoi(nx());
-        else if (a == "--origin-clamp-um") o.clamp_um = atof(nx()); else if (a == "--dicom") o.dicom_dir = nx(); else if (a == "--icc") o.icc = nx();
+        else if (a == "--empty-tile-colour") { std::string v = nx(); if (v == "white") g_empty = 255; else if (v == "black") g_empty = 0; else usage(); } else if (a == "--origin-clamp-um") o.clamp_um = atof(nx()); else if (a == "--dicom") o.dicom_dir = nx(); else if (a == "--icc") o.icc = nx();
         else if (a == "--orientation") { if (sscanf(nx(), "%lf,%lf,%lf,%lf,%lf,%lf", o.orient, o.orient + 1, o.orient + 2, o.orient + 3, o.orient + 4, o.orient + 5) != 6) usage(); }
         else if (a == "--dump") { int k = atoi(nx()), ty = atoi(nx()), tx = atoi(nx()); o.dumpdir = nx(); o.dumps.push_back({k, ty, tx}); }
         else usage();
@@ -383,7 +384,7 @@ int main(int argc, char** argv) {
         Mat m = pixel_frame(e, k, i0y, i0x, Fs);
         if (k <= g.top) for (int ty = fdiv(i0y, 256); ty <= fdiv(i0y + Fs - 1, 256); ty++) for (int tx = fdiv(i0x, 256); tx <= fdiv(i0x + Fs - 1, 256); tx++) if (!tile_exists(k, ty, tx)) {
             int ya = std::max(ty * 256, i0y), yb = std::min(ty * 256 + 256, i0y + Fs), xa = std::max(tx * 256, i0x), xb = std::min(tx * 256 + 256, i0x + Fs);
-            for (int y = ya; y < yb; y++) for (int x = xa; x < xb; x++) m.at(y - i0y, x - i0x) = c == 0 ? 255 : 0; }
+            for (int y = ya; y < yb; y++) for (int x = xa; x < xb; x++) m.at(y - i0y, x - i0x) = c == 0 ? g_empty : 0; }
         return m;
     };
     std::map<int, std::shared_ptr<std::vector<uint8_t>>> ccache; std::mutex ccmu;
@@ -473,7 +474,7 @@ int main(int argc, char** argv) {
                         for (int y = 8; y < std::min(lp.r, tp[c].r) - 8; y++) for (int x = 8; x < std::min(lp.c, tp[c].c) - 8; x++) { tot++; bad += lp.at(y, x) != tp[c].at(y, x); } }
                     printf("  LP check layer %d -> %d (interior): %ld of %ld samples differ\n", g.top - 1, g.top, bad, tot); }
                 for (int c = 0; c < 3; c++) for (int ty = 0; ty * 256 < Rt; ty++) for (int tx = 0; tx * 256 < Ct; tx++) if (!tile_exists(g.top, ty, tx))
-                    for (int y = ty * 256; y < std::min(Rt, ty * 256 + 256); y++) for (int x = tx * 256; x < std::min(Ct, tx * 256 + 256); x++) tp[c].at(y, x) = c == 0 ? 255 : 0;
+                    for (int y = ty * 256; y < std::min(Rt, ty * 256 + 256); y++) for (int x = tx * 256; x < std::min(Ct, tx * 256 + 256); x++) tp[c].at(y, x) = c == 0 ? g_empty : 0;
                 for (int c = 0; c < 3; c++) plane[c] = tp[c];
                 plane_layer = g.top; win.m.clear();
             }
@@ -487,9 +488,9 @@ int main(int argc, char** argv) {
                 pool.run(tix, [&](int tx, int) {
                     int i0y = iby + ty * F, i0x = ibx + tx * F; FrameRec fr{k, ty, tx, i0y, i0x, 'D', 'D', 0, 0, -1}; st.frames++;
                     int y0 = std::max(i0y, 0), x0 = std::max(i0x, 0), y1 = std::min(i0y + F, Rk), x1 = std::min(i0x + F, Ck);
-                    if (y1 <= y0 || x1 <= x0) { i32 w[3] = {255, 255, 255}; fr.cs = const_codestream(w); st.white++; }
+                    if (y1 <= y0 || x1 <= x0) { i32 w[3] = {g_empty, g_empty, g_empty}; fr.cs = const_codestream(w); st.white++; }
                     else {
-                        Pyr py[3]; for (int c = 0; c < 3; c++) { Mat pix(F, F); if (c == 0) std::fill(pix.v.begin(), pix.v.end(), 255);
+                        Pyr py[3]; for (int c = 0; c < 3; c++) { Mat pix(F, F); if (c == 0) std::fill(pix.v.begin(), pix.v.end(), g_empty);
                             for (int y = y0; y < y1; y++) memcpy(&pix.v[(size_t)(y - i0y) * F + (x0 - i0x)], &plane[c].v[(size_t)y * Ck + x0], (size_t)(x1 - x0) * 4); py[c] = full_pyramid(pix, D); }
                         colour_convert(py[0], py[1], py[2], o.trunc_); std::vector<i32> coef((size_t)F * F * 3); for (int c = 0; c < 3; c++) mallat(py[c], F, D, &coef[(size_t)c * F * F]);
                         auto cs = std::make_shared<std::vector<uint8_t>>(); if (!encode_frame(coef.data(), F, *cs)) die("encode failed", k, ty, tx); fr.cs = cs; st.encoded++; }
@@ -520,7 +521,7 @@ int main(int argc, char** argv) {
             std::vector<FrameRec> local(tix);
             pool.run(tix, [&](int tx, int) {
                 FP& f = cur[tx]; FrameRec fr{k, ty, tx, f.i0y, f.i0x, f.edge ? 'E' : 'I', 'G', 0, 0, -1}; st.frames++; (f.edge ? st.edge : st.interior)++;
-                if (f.state == 0) { i32 w[3] = {255, 255, 255}; fr.path = 'W'; st.white++; if (o.encode) { fr.cs = const_codestream(w); fr.bytes = (long)fr.cs->size(); st.bytes += fr.bytes; } local[tx] = fr; return; }
+                if (f.state == 0) { i32 w[3] = {g_empty, g_empty, g_empty}; fr.path = 'W'; st.white++; if (o.encode) { fr.cs = const_codestream(w); fr.bytes = (long)fr.cs->size(); st.bytes += fr.bytes; } local[tx] = fr; return; }
                 if (f.state == 2) st.masked++;
                 Engine eng[3] = {Engine(win, 0), Engine(win, 1), Engine(win, 2)}; Pyr py[3]; bool have_py = false; bool omit = false; i32 ocol[3] = {255, 255, 255};
                 double ta = now(); bool is_dump = false; for (auto& d : o.dumps) if (d[0] == k && d[1] == ty && d[2] == tx) is_dump = true;
@@ -559,7 +560,7 @@ int main(int argc, char** argv) {
                     for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, cvv[c]); have_py = true; fr.path = 'F'; st.fast++; st.t_fast_ns += (long)((now() - tc) * 1e9);
                     if (o.verify_every && (st.fast % o.verify_every == 0)) { st.fast_verified++; for (int c = 0; c < 3; c++) { Pyr ref = build_frame(eng[c], k, f.i0y, f.i0x, F, D, h); if (!same(ref, py[c])) { st.fast_bad++; break; } } }
                 }
-                if (!have_py && f.edge && f.plan.blocks.empty()) { for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, c == 0 ? 255 : 0); have_py = true; fr.path = 'F'; st.fast++; }   // padding frame: white
+                if (!have_py && f.edge && f.plan.blocks.empty()) { for (int c = 0; c < 3; c++) py[c] = const_pyramid(F, D, c == 0 ? g_empty : 0); have_py = true; fr.path = 'F'; st.fast++; }   // padding frame: white
                 if (!have_py) {
                     if (f.edge || have_pix) { double tp = now(); if (!have_pix) for (int c = 0; c < 3; c++) pix[c] = masked_pixel_frame(eng[c], c, k, f.i0y, f.i0x, F); for (int c = 0; c < 3; c++) py[c] = full_pyramid(pix[c], D); fr.path = 'P'; st.t_pixel_ns += (long)((now() - tp) * 1e9); }
                     else { double tb2 = now(); for (int c = 0; c < 3; c++) py[c] = build_frame(eng[c], k, f.i0y, f.i0x, F, D, h); st.t_build_ns += (long)((now() - tb2) * 1e9); }
