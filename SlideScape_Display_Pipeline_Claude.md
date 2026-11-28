@@ -26,3 +26,8 @@ No. For three tissue frames of layer 0 (`1.isyntax`, DICOM frames decoded with O
 - **Magnification interpolation is nearest-neighbour by default**: `PathPrefs.viewerInterpolateBilinear` defaults to `false` (`PathPrefs.java:1411`), and `QuPathViewer.java:2108-2110` selects bilinear only when that preference is on. QuPath should therefore look crisp like SlideScape, which makes it a good second viewer for the sharpness question.
 - DICOM whole slide images are read through **Bio-Formats 8.4.0** (`gradle/libs.versions.toml`; the changelog lists DICOM WSI support since the Bio-Formats 6.11 era). Whether Bio-Formats assembles our six layer files into one pyramid when `1_L0.dcm` is opened is **[open]** (the owner will report).
 - Launching (owner-granted, outside the sandbox): `QuPath-0.7.0.exe C:\Users\Public\iSyntax_review\dicom_1\1_L0.dcm`; the program started (JVM process present), whether the image opened was not checked by me.
+
+## Owner's observation (2026-11-27) **[observed by the owner]**
+
+SlideScape (original `1.isyntax`) and QuPath (transcoded DICOM series, nearest-neighbour magnification in both) look similar to the owner's eye. This supports the hypothesis above: the sharper look of SlideScape against OmniHisto came from the viewers' display filtering, not from the transcoded data (luma detail identical to the iSyntax Y plane, section "Is the transcoded DICOM less sharp?"). Not yet compared: colour (expected small differences from the wavelet-domain conversion) and behaviour when zooming between layers.
+
